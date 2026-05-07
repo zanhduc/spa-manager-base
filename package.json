@@ -1,0 +1,30 @@
+{
+    "name": "soanhang-congno",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build:client": "vite build",
+        "build:server": "node esbuild.server.js",
+        "build": "npm run build:client && npm run build:server",
+        "push": "npm run build && clasp push",
+        "deploy:prod": "node --input-type=module -e \"import fs from 'node:fs'; const p='appsscript.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.webapp={...(j.webapp||{}),executeAs:'USER_DEPLOYING',access:'ANYONE_ANONYMOUS'}; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('appsscript webapp configured: USER_DEPLOYING + ANYONE_ANONYMOUS');\" && npm run build && clasp push && V=$(clasp version \"prod update $(date '+%F %T')\" | sed -E 's/.*Created version ([0-9]+).*/\\1/') && DID=${DEPLOYMENT_ID:-$(clasp deployments | sed -nE 's/^- ([^ ]+) @([0-9]+).*/\\1 \\2/p' | sort -k2,2nr | head -n1 | awk '{print $1}')} && if [ -z \"$DID\" ]; then echo \"ERROR: Khong tim thay deployment dang ton tai. Hay truyen DEPLOYMENT_ID.\"; exit 1; fi && echo \"Deploy to: $DID (version $V)\" && clasp deploy -i \"$DID\" -V \"$V\" -d \"prod\""
+    },
+    "dependencies": {
+        "firebase": "^12.12.1",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-hot-toast": "^2.6.0"
+    },
+    "devDependencies": {
+        "@tailwindcss/postcss": "^4.2.3",
+        "@vitejs/plugin-react": "^4.0.0",
+        "autoprefixer": "^10.4.27",
+        "esbuild": "^0.20.0",
+        "postcss": "^8.5.6",
+        "tailwindcss": "^4.2.1",
+        "vite": "^5.0.0",
+        "vite-plugin-singlefile": "^0.13.0"
+    }
+}

@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#3b82f6" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Soạn Hàng" />
+    <title>Soạn Hàng - Công Nợ</title>
+    <script>
+      (function () {
+        // Fallback for edge cases where Vite preload helper is referenced
+        // but not injected in constrained runtimes (e.g. Apps Script iframe).
+        if (typeof globalThis.__VITE_PRELOAD__ !== "function") {
+          var __VITE_PRELOAD__ = function (baseModule) {
+            if (typeof baseModule === "function") return baseModule();
+            return Promise.resolve(baseModule);
+          };
+          globalThis.__VITE_PRELOAD__ = __VITE_PRELOAD__;
+        }
+
+        // --- 1. SETTING LOGO CHÍNH ---
+        // Đã chèn logo-dulia.jpg
+        var iconUrl = "https://i.postimg.cc/wTf0f6Jn/logo-dulia.jpg";
+
+        var manifest = {
+          name: "Soạn Hàng - Công Nợ",
+          short_name: "Soạn Hàng",
+          start_url: ".",
+          display: "standalone",
+          background_color: "#ffffff",
+          theme_color: "#3b82f6",
+          icons: [
+            {
+              src: iconUrl,
+              sizes: "512x512",
+              type: "image/jpeg",
+              purpose: "any maskable",
+            },
+          ],
+        };
+        var blob = new Blob([JSON.stringify(manifest)], {
+          type: "application/manifest+json",
+        });
+
+        // --- 2. THIẾT LẬP MANIFEST (Android & PC) ---
+        var link = document.createElement("link");
+        link.rel = "manifest";
+        link.href = URL.createObjectURL(blob);
+        document.head.appendChild(link);
+
+        // --- 3. THIẾT LẬP APPLE TOUCH ICON (iOS) ---
+        var appleLink = document.createElement("link");
+        appleLink.rel = "apple-touch-icon";
+        appleLink.href = iconUrl;
+        document.head.appendChild(appleLink);
+      })();
+    </script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        background: var(--bg);
+      }
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(16px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes pulseglow {
+        0%,
+        100% {
+          filter: drop-shadow(0 0 10px rgba(37, 99, 235, 0.4));
+        }
+        50% {
+          filter: drop-shadow(0 0 22px rgba(37, 99, 235, 0.8));
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(0, 0, 0, 0.1);
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+
+      /* Fix dark background on browser autofill */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover,
+      input:-webkit-autofill:focus,
+      input:-webkit-autofill:active {
+        -webkit-box-shadow: 0 0 0 30px #ffffff inset !important;
+        -webkit-text-fill-color: #0f172a !important;
+        transition: background-color 5000s ease-in-out 0s;
+      }
+
+      /* Fix iOS native date inputs overflowing flex/grid bounds */
+      input[type="date"] {
+        -webkit-appearance: none;
+        appearance: none;
+        min-width: 0;
+        max-width: 100%;
+        background-color: #ffffff;
+      }
+
+      /* Fix iOS Auto-zoom on inputs */
+      @media screen and (max-width: 768px) {
+        input,
+        select,
+        textarea {
+          font-size: 16px !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/client/main.jsx"></script>
+  </body>
+</html>
