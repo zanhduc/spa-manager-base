@@ -28,25 +28,23 @@ const prefetchOrderDefaults = async () => {
 
 export default function LoginPage({
   onLoginSuccess,
-  appMode = "web",
-  onChangeAppMode = () => {},
 }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [showPass, setShowPass] = useState(false)
-  const [demoAccounts, setDemoAccounts] = useState([])
+  // const [demoAccounts, setDemoAccounts] = useState([])
 
-  useEffect(() => {
-    call("getDemoAccounts")
-      .then((res) => {
-        if (res?.success && Array.isArray(res.data)) {
-          setDemoAccounts(res.data)
-        }
-      })
-      .catch(console.error)
-  }, [])
+  // useEffect(() => {
+  //   call("getDemoAccounts")
+  //     .then((res) => {
+  //       if (res?.success && Array.isArray(res.data)) {
+  //         setDemoAccounts(res.data)
+  //       }
+  //     })
+  //     .catch(console.error)
+  // }, [])
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -77,11 +75,11 @@ export default function LoginPage({
     }
   }
 
-  const fillDemo = (acc) => {
-    setEmail(acc.email)
-    setPassword(acc.password)
-    setError("")
-  }
+  // const fillDemo = (acc) => {
+  //   setEmail(acc.email)
+  //   setPassword(acc.password)
+  //   setError("")
+  // }
 
   return (
     <div className="min-h-screen flex items-start md:items-center justify-center p-4 md:p-6 pb-20 bg-slate-100 font-sans text-slate-800">
@@ -94,21 +92,8 @@ export default function LoginPage({
             loading="eager"
             fetchpriority="high"
           />
-          <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">DULI Accounting</h1>
-          <p className="text-sm mt-1 text-slate-500">Hệ thống dành riêng cho bạn</p>
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => onChangeAppMode(appMode === "pos" ? "web" : "pos")}
-              className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
-                appMode === "pos"
-                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                  : "border-slate-300 bg-slate-50 text-slate-600"
-              }`}
-            >
-              {appMode === "pos" ? "POS mode: Bật" : "POS mode: Tắt"}
-            </button>
-          </div>
+          <h1 className="text-3xl font-bold bg-gradient-to-br from-rose-700 to-rose-900 bg-clip-text text-transparent">DULI Spa</h1>
+          <p className="text-sm mt-1 text-slate-500">Điều phối trị liệu và chăm sóc khách hàng</p>
         </div>
 
         <form onSubmit={handleLogin} className="flex flex-col gap-5">
@@ -166,6 +151,7 @@ export default function LoginPage({
           </button>
         </form>
 
+        {/* Tạm ẩn tài khoản demo
         {demoAccounts.length > 0 && (
           <div className="mt-8 pt-6 text-center border-t border-slate-200">
             <p className="text-xs font-medium mb-3 text-slate-400 uppercase tracking-wider">Tài khoản demo</p>
@@ -189,6 +175,7 @@ export default function LoginPage({
             </div>
           </div>
         )}
+        */}
       </div>
     </div>
   )

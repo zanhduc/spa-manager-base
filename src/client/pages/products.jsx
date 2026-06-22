@@ -1,17 +1,32 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  CACHE_INVALIDATED_EVENT,
   CACHE_KEYS,
+  clearReadCacheByKeys,
   createProductCatalogItem,
   deleteProductCatalogItem,
   getProductCatalog,
   updateProductCatalogItem,
   formatAllSheets,
 } from "../api";
+import { readCache } from "../api/localCache.js";
 import { runInBackground } from "../api/backgroundApi";
 import { useUser } from "../context";
 import ImageUploader from "../components/ImageUploader";
+import {
+  bootstrapSilentAny,
+  hasCachedResponse,
+  readCachedList,
+  shouldBlockPanelUI,
+} from "../utils/cacheBootstrap.js";
+import { useCacheSync } from "../hooks/useCacheSync.js";
+import { validateProductRow } from "../utils/productValidators.js";
+import {
+  clearFormDraft,
+  FORM_DRAFT_KEYS,
+  readFormDraft,
+  writeFormDraft,
+} from "../utils/formDraftCache.js";
 
 const toNum = (v) => Number(String(v ?? "").replace(/[^\d.-]/g, "")) || 0;
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
@@ -135,33 +150,53 @@ function LabeledTextInput({
 
 /* ── Data helpers ── */
 
-const toViewRow = (p, idx) => ({
-  id: `sp-${idx}-${Date.now()}`,
-  isNew: false,
-  originalTenSanPham: String(p.tenSanPham || ""),
-  originalNhomHang: String(p.nhomHang || ""),
-  originalDonVi: String(p.donVi || ""),
-  tenSanPham: String(p.tenSanPham || ""),
-  anhSanPham: String(p.anhSanPham || ""),
-  nhomHang: String(p.nhomHang || ""),
-  donVi: String(p.donVi || ""),
-  donGiaBan: toNum(p.donGiaBan),
-  giaVon: toNum(p.giaVon),
-});
+const productRowKey = (tenSanPham, donVi) =>
+  `${String(tenSanPham || "").trim().toLowerCase()}::${String(donVi || "").trim().toLowerCase()}`;
+
+const toViewRow = (p, idx) => {
+  const tenSanPham = String(p.tenSanPham || "");
+  const donVi = String(p.donVi || "");
+  const stableKey = productRowKey(tenSanPham, donVi);
+  return {
+    id: stableKey ? `sp-${stableKey}` : `sp-idx-${idx}`,
+    isNew: false,
+    originalTenSanPham: tenSanPham,
+    originalNhomHang: String(p.nhomHang || ""),
+    originalDonVi: donVi,
+    tenSanPham,
+    anhSanPham: String(p.anhSanPham || ""),
+    nhomHang: String(p.nhomHang || ""),
+    donVi,
+    donGiaBan: toNum(p.donGiaBan),
+    giaVon: toNum(p.giaVon),
+  };
+};
 
 /* ── Main Page ── */
 
 export default function ProductsPage() {
   const { user } = useUser();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !hasCachedResponse(CACHE_KEYS.productCatalog));
   const [savingKey, setSavingKey] = useState("");
   const [deletingKey, setDeletingKey] = useState("");
   const [query, setQuery] = useState("");
-  const [openId, setOpenId] = useState("");
-  const [rows, setRows] = useState([]);
+  const [openId, setOpenId] = useState(() => {
+    const saved = readFormDraft(FORM_DRAFT_KEYS.productEditor);
+    return String(saved?.openId || "").trim();
+  });
+  const [rows, setRows] = useState(() => {
+    const cached = readCachedList(CACHE_KEYS.productCatalog).map((p, idx) => toViewRow(p, idx));
+    const saved = readFormDraft(FORM_DRAFT_KEYS.productEditor);
+    const draftRows = Array.isArray(saved?.newRows) ? saved.newRows : [];
+    if (!draftRows.length) return cached;
+    const draftIds = new Set(draftRows.map((row) => row.id));
+    return [...draftRows, ...cached.filter((row) => !draftIds.has(row.id))];
+  });
+  const productDraftTimerRef = useRef(null);
   const [errorsMap, setErrorsMap] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Toggle hiện/ẩn ảnh
   const [showImages, setShowImages] = useState(
@@ -175,39 +210,78 @@ export default function ProductsPage() {
     });
   };
 
-  const loadProducts = async ({ silent = false } = {}) => {
+  const loadProducts = async ({ silent = false, force = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const res = await getProductCatalog();
+      const res = await getProductCatalog({ force });
       if (res?.success && Array.isArray(res.data)) {
-        setRows(res.data.map((p, idx) => toViewRow(p, idx)));
+        mergeRowsWithDraft(res.data);
       } else {
-        setRows([]);
+        setRows((prev) => prev.filter((row) => row.isNew));
         if (res?.message) toast.error(res.message);
       }
     } catch (e) {
-      setRows([]);
+      setRows((prev) => prev.filter((row) => row.isNew));
       toast.error("Không tải được danh sách sản phẩm");
     } finally {
       if (!silent) setLoading(false);
     }
   };
 
+  const mergeRowsWithDraft = (catalogRows = []) => {
+    const cached = catalogRows.map((p, idx) => toViewRow(p, idx));
+    setRows((prev) => {
+      const draftRows = prev.filter((row) => row.isNew);
+      if (!draftRows.length) return cached;
+      const draftIds = new Set(draftRows.map((row) => row.id));
+      return [...draftRows, ...cached.filter((row) => !draftIds.has(row.id))];
+    });
+  };
+
   useEffect(() => {
-    loadProducts();
+    void loadProducts({ silent: bootstrapSilentAny(CACHE_KEYS.productCatalog) });
   }, []);
 
   useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
-      if (!keys.includes(CACHE_KEYS.productCatalog)) return;
-      loadProducts({ silent: true });
+    const newRows = rows.filter((row) => row.isNew);
+    if (!newRows.length && !openId) {
+      clearFormDraft(FORM_DRAFT_KEYS.productEditor);
+      return undefined;
+    }
+    if (productDraftTimerRef.current) clearTimeout(productDraftTimerRef.current);
+    productDraftTimerRef.current = setTimeout(() => {
+      writeFormDraft(FORM_DRAFT_KEYS.productEditor, { newRows, openId }, { page: "products" });
+    }, 400);
+    return () => {
+      if (productDraftTimerRef.current) clearTimeout(productDraftTimerRef.current);
     };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-  }, []);
+  }, [rows, openId]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadProducts({ silent: true, force: true });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const validateRow = validateProductRow;
+
+  useCacheSync({
+    cacheKeys: [CACHE_KEYS.productCatalog],
+    onCacheUpdated: (_detail, cacheKey) => {
+      if (cacheKey !== CACHE_KEYS.productCatalog) return;
+      const data = _detail?.response?.data;
+      if (Array.isArray(data)) mergeRowsWithDraft(data);
+    },
+    onCacheInvalidated: (keys) => {
+      if (!keys.includes(CACHE_KEYS.productCatalog)) return;
+      const cached = readCache(CACHE_KEYS.productCatalog)?.response?.data;
+      if (Array.isArray(cached)) mergeRowsWithDraft(cached);
+      else loadProducts({ silent: true });
+    },
+  });
 
   const filteredRows = useMemo(() => {
     const q = foldText(query);
@@ -216,6 +290,8 @@ export default function ProductsPage() {
       foldText(`${r.tenSanPham} ${r.nhomHang} ${r.donVi}`).includes(q),
     );
   }, [rows, query]);
+
+  const blockPanel = shouldBlockPanelUI(loading, rows.length > 0);
 
   const patchRow = (id, patch) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -254,7 +330,11 @@ export default function ProductsPage() {
   };
 
   const removeDraft = (id) => {
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    setRows((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      if (!next.some((row) => row.isNew)) clearFormDraft(FORM_DRAFT_KEYS.productEditor);
+      return next;
+    });
     if (openId === id) setOpenId("");
   };
 
@@ -271,34 +351,6 @@ export default function ProductsPage() {
         handleSettingChange,
       );
   }, []);
-
-  const validateRow = (row) => {
-    const tenSanPham = String(row.tenSanPham || "").trim();
-    const nhomHang = String(row.nhomHang || "").trim();
-    const donVi = String(row.donVi || "").trim();
-    const donGiaBan = toNum(row.donGiaBan);
-    const giaVon = toNum(row.giaVon);
-
-    const err = {};
-    if (!tenSanPham) err.tenSanPham = "Chưa có tên";
-    if (!donVi) err.donVi = "Cần đơn vị";
-    if (donGiaBan <= 0) err.donGiaBan = "Sai giá";
-    if (giaVon <= 0) err.giaVon = "Sai giá";
-
-    if (Object.keys(err).length > 0) return { ok: false, errors: err };
-
-    return {
-      ok: true,
-      data: {
-        tenSanPham,
-        anhSanPham: String(row.anhSanPham || "").trim(),
-        nhomHang,
-        donVi,
-        donGiaBan,
-        giaVon,
-      },
-    };
-  };
 
   const handleSaveRow = (row) => {
     const validated = validateRow(row);
@@ -349,6 +401,11 @@ export default function ProductsPage() {
     });
     setSavingKey("");
 
+    if (isNew) {
+      const remainingNew = rows.filter((item) => item.id !== row.id && item.isNew);
+      if (!remainingNew.length) clearFormDraft(FORM_DRAFT_KEYS.productEditor);
+    }
+
     const apiCall = isNew
       ? () => createProductCatalogItem(data)
       : () => updateProductCatalogItem({
@@ -366,7 +423,6 @@ export default function ProductsPage() {
         if (result?.success) {
           formatAllSheets().catch(() => {});
         }
-        loadProducts().catch(() => {});
       },
     });
   };
@@ -376,6 +432,24 @@ export default function ProductsPage() {
       removeDraft(row.id);
       return;
     }
+    
+    const history = readCachedList(CACHE_KEYS.stayHistory) || [];
+    const targetTen = String(row.originalTenSanPham || row.tenSanPham).trim().toLowerCase();
+    const targetDonVi = String(row.originalDonVi || row.donVi).trim().toLowerCase();
+    
+    const isInUse = history.some((stay) => 
+       Array.isArray(stay.dichVuDaDung) && 
+       stay.dichVuDaDung.some((d) => 
+         String(d.tenSanPham || "").trim().toLowerCase() === targetTen &&
+         String(d.donVi || "").trim().toLowerCase() === targetDonVi
+       )
+    );
+    
+    if (isInUse) {
+       toast.error("Không thể xóa sản phẩm đã được sử dụng trong lịch sử đơn hàng.");
+       return;
+    }
+
     setDeleteTarget(row);
   };
 
@@ -401,17 +475,16 @@ export default function ProductsPage() {
         if (result?.success) {
           formatAllSheets().catch(() => {});
         }
-        loadProducts().catch(() => {});
       },
     });
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
-      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
+    <main className="app-page bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30 pb-24">
+      <div className="app-shell">
         <div className="mb-6 md:mb-8">
           <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
-            Danh sách sản phẩm
+            Sản phẩm / dược liệu
           </h1>
           <p className="mt-2 text-sm md:text-base text-slate-500">
             Bấm vào sản phẩm để mở chi tiết, lưu hoặc xóa.
@@ -423,7 +496,7 @@ export default function ProductsPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tìm theo tên sản phẩm hoặc đơn vị..."
+              placeholder="Tìm theo tên sản phẩm, dược liệu hoặc đơn vị..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
             />
             <div className="flex gap-2">
@@ -433,12 +506,12 @@ export default function ProductsPage() {
                 onClick={toggleImages}
                 className={`rounded-xl border px-3 py-2.5 text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                   showImages
-                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    ? "border-rose-300 bg-rose-50 text-rose-700"
                     : "border-slate-200 bg-slate-50 text-slate-400"
                 }`}
               >
                 <span
-                  className={`inline-block w-7 h-4 rounded-full relative transition-colors ${showImages ? "bg-blue-500" : "bg-slate-300"}`}
+                  className={`inline-block w-7 h-4 rounded-full relative transition-colors ${showImages ? "bg-rose-500" : "bg-slate-300"}`}
                 >
                   <span
                     className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all ${showImages ? "left-3.5" : "left-0.5"}`}
@@ -455,16 +528,20 @@ export default function ProductsPage() {
               </button>
               <button
                 type="button"
-                onClick={loadProducts}
-                className="rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-2.5 text-sm font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 whitespace-nowrap"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="rounded-xl bg-gradient-to-r from-rose-700 to-rose-500 px-4 py-2.5 text-sm font-semibold text-white hover:shadow-lg hover:shadow-rose-700/25 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-70 inline-flex items-center gap-2"
               >
-                Tải lại
+                {refreshing ? (
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/80 border-r-transparent" />
+                ) : null}
+                {refreshing ? "Đang tải..." : "Tải lại"}
               </button>
             </div>
           </div>
         </section>
 
-        {loading ? (
+        {blockPanel ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
             Đang tải danh sách sản phẩm...
           </div>
@@ -588,7 +665,7 @@ export default function ProductsPage() {
                           onChange={(e) =>
                             patchRow(row.id, { tenSanPham: e.target.value })
                           }
-                          placeholder="Tên sản phẩm"
+                          placeholder="Tên sản phẩm / dược liệu"
                           error={errorsMap[row.id]?.tenSanPham}
                         />
                         <LabeledTextInput
@@ -598,7 +675,7 @@ export default function ProductsPage() {
                           onChange={(e) =>
                             patchRow(row.id, { nhomHang: e.target.value })
                           }
-                          placeholder="Nhóm hàng"
+                          placeholder="Nhóm spa"
                         />
                         <LabeledTextInput
                           className="lg:col-span-2"
@@ -616,7 +693,7 @@ export default function ProductsPage() {
                           tone="emerald"
                           value={row.donGiaBan}
                           onChange={(v) => patchRow(row.id, { donGiaBan: v })}
-                          placeholder="Đơn giá bán"
+                          placeholder="Giá bán"
                           error={errorsMap[row.id]?.donGiaBan}
                         />
                         <LabeledMoneyInput

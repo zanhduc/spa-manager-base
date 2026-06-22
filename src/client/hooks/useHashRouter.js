@@ -4,14 +4,15 @@ const VALID_ROUTES = [
   "create-order",
   "history",
   "products",
+  "treatment-catalogs",
   "inventory",
   "stock",
-  "debt",
+  "customer-progress",
+  "staff-management",
   "stats",
-  "print-diagnostic",
 ]
 
-const DEFAULT_ROUTE = "create-order"
+const DEFAULT_ROUTE = "stats"
 
 function getHashRoute() {
   const hash = window.location.hash.replace(/^#\/?/, "").trim()

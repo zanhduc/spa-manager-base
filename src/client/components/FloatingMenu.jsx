@@ -7,6 +7,7 @@ import {
 import {
   getAppSetting,
   revokeDeviceToken,
+  revokeSessionLogin,
   setAppSetting,
 } from "../api/index.js";
 import brandLogo from "../assets/logo-dulia.jpg";
@@ -17,7 +18,6 @@ export default function FloatingMenu({
   currentPath,
   onNavigate,
   appMode = "web",
-  onChangeAppMode = () => {},
 }) {
   const { user, logout } = useUser();
   const isPosMode = appMode === "pos";
@@ -99,17 +99,19 @@ export default function FloatingMenu({
   };
 
   const menuItems = [
-    { id: "create-order", label: "Quản lý phòng", icon: "🏨" },
-    { id: "history", label: "Lịch sử lưu trú", icon: "🕘" },
-    { id: "products", label: "Quản lý sản phẩm", icon: "📦" },
+    { id: "stats", label: "Tổng quan", icon: "📊" },
+    { id: "create-order", label: "Điều phối trị liệu", icon: "🗓️" },
+    { id: "history", label: "Danh sách lịch", icon: "🧾" },
+    { id: "customer-progress", label: "Tiến trình khách", icon: "👥" },
+    { id: "staff-management", label: "Quản lý nhân sự", icon: "🧑‍💼" },
+    { id: "treatment-catalogs", label: "Liệu trình & Combo", icon: "🧩" },
+    { id: "products", label: "Hàng hóa", icon: "📦" },
     ...(showInventory
       ? [
-          { id: "stock", label: "Tồn kho", icon: "🏢" },
-          { id: "inventory", label: "Nhập hàng (Chi tiêu gia đình)", icon: "📥" },
+          { id: "stock", label: "Kiểm kho", icon: "📋" },
+          { id: "inventory", label: "Nhập hàng", icon: "📥" },
         ]
       : []),
-    { id: "debt", label: "Quản lý công nợ", icon: "📒" },
-    { id: "stats", label: "Thống kê", icon: "📊" },
     // { id: "print-diagnostic", label: "Tự kiểm tra in", icon: "🖨️" },
   ];
 
@@ -120,23 +122,17 @@ export default function FloatingMenu({
 
   const handleLogout = async () => {
     const token = String(localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) || "").trim();
-    if (token) {
-      try {
+    try {
+      if (token) {
         await revokeDeviceToken(token, DEVICE_TOKEN_SCOPE);
-      } catch (e) {
-        // Silent fallback to local logout.
       }
+      await revokeSessionLogin(DEVICE_TOKEN_SCOPE);
+    } catch (e) {
+      // Silent fallback to local logout.
     }
     localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
     logout();
   };
-
-  const posTabs = [
-    { id: "create-order", label: "Phòng", icon: "🏨" },
-    { id: "history", label: "Lưu trú", icon: "🕘" },
-    { id: "debt", label: "Công nợ", icon: "📒" },
-    { id: "print-diagnostic", label: "In", icon: "🖨️" },
-  ];
 
   return (
     <>
@@ -248,16 +244,6 @@ export default function FloatingMenu({
                 />
               </button>
             </div>
-            {/* <button
-              onClick={() => onChangeAppMode(isPosMode ? "web" : "pos")}
-              className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold transition-colors text-sm ${
-                isPosMode
-                  ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
-                  : "text-slate-700 bg-slate-100 hover:bg-slate-200"
-              }`}
-            >
-              {isPosMode ? "POS mode: Bật" : "POS mode: Tắt"}
-            </button> */}
             <button
               onClick={handleLogout}
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
@@ -347,16 +333,6 @@ export default function FloatingMenu({
             </button>
           </div>
           <button
-            onClick={() => onChangeAppMode(isPosMode ? "web" : "pos")}
-            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold transition-colors text-sm ${
-              isPosMode
-                ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
-                : "text-slate-700 bg-slate-100 hover:bg-slate-200"
-            }`}
-          >
-            {isPosMode ? "POS mode: Bật" : "POS mode: Tắt"}
-          </button>
-          <button
             onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-red-600 font-semibold hover:bg-red-50 transition-colors text-sm"
           >
@@ -365,31 +341,6 @@ export default function FloatingMenu({
         </div>
       </aside>
 
-      {isPosMode && (
-        <nav className="fixed bottom-0 left-0 right-0 z-[9100] border-t border-slate-200 bg-white/95 backdrop-blur-xl px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto grid w-full max-w-3xl grid-cols-4 gap-2">
-            {posTabs.map((item) => {
-              const isActive = currentPath === item.id;
-              return (
-                <button
-                  key={`pos-tab-${item.id}`}
-                  onClick={() => handleNav(item.id)}
-                  className={`rounded-xl px-2 py-2.5 text-center transition-colors ${
-                    isActive
-                      ? "bg-rose-50 text-rose-700"
-                      : "bg-slate-50 text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="text-lg leading-none">{item.icon}</div>
-                  <div className="mt-1 text-[11px] font-semibold">
-                    {item.label}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-      )}
     </>
   );
 }

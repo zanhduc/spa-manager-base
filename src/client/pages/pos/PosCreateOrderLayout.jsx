@@ -39,10 +39,10 @@ export default function PosCreateOrderLayout({
 }) {
   return (
     <main className="min-h-screen bg-slate-100 pb-24">
-      <div className="sticky top-0 z-20 border-b border-sky-700 bg-gradient-to-r from-sky-700 to-sky-600 px-4 py-3 text-white shadow-md">
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-3">
+      <div className="sticky top-0 z-20 border-b border-rose-700 bg-gradient-to-r from-rose-700 to-rose-600 px-4 py-3 text-white shadow-md">
+        <div className="app-shell app-shell--pos flex w-full items-center gap-3">
           <div className="rounded-lg bg-white/15 px-3 py-2 text-sm font-bold tracking-wide">
-            POS
+            Quầy
           </div>
           <div className="flex-1">
             <input
@@ -67,13 +67,13 @@ export default function PosCreateOrderLayout({
           <button
             type="button"
             onClick={startNewPosOrder}
-            className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-sky-700"
+            className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-rose-700"
           >
             Đơn mới
           </button>
         </div>
         {showProductSuggestions && posProductSuggestions.length > 0 && (
-          <div className="mx-auto mt-2 w-full max-w-7xl rounded-2xl border border-sky-300 bg-white p-2 shadow-2xl">
+          <div className="app-shell app-shell--pos mt-2 w-full rounded-2xl border border-rose-300 bg-white p-2 shadow-2xl">
             <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto md:grid-cols-2">
               {posProductSuggestions.map((p) => (
                 <button
@@ -81,7 +81,7 @@ export default function PosCreateOrderLayout({
                   type="button"
                   onMouseDown={(ev) => ev.preventDefault()}
                   onClick={() => handleAddProductFromSuggestion(p)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-left hover:bg-sky-50"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-left hover:bg-rose-50"
                 >
                   <p className="text-sm font-semibold text-slate-800">{p.tenSanPham}</p>
                   <p className="text-xs text-slate-500">
@@ -94,14 +94,14 @@ export default function PosCreateOrderLayout({
         )}
       </div>
 
-      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-12">
+      <div className="app-shell app-shell--pos grid w-full grid-cols-1 gap-4 px-1 py-4 lg:grid-cols-12">
         <section className="lg:col-span-8">
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">
                 Đơn hàng đang soạn
               </h3>
-              <span className="rounded-lg bg-sky-100 px-2 py-1 text-xs font-bold text-sky-700">
+              <span className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
                 {totalItems} mặt hàng
               </span>
             </div>
@@ -117,7 +117,7 @@ export default function PosCreateOrderLayout({
                     <div
                       key={`pos-row-${product.id}`}
                       className={`grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-slate-100 px-4 py-3 ${
-                        isSelected ? "bg-sky-50" : "bg-white"
+                        isSelected ? "bg-rose-50" : "bg-white"
                       }`}
                       onClick={() => setSelectedProductId(product.id)}
                     >
@@ -193,7 +193,7 @@ export default function PosCreateOrderLayout({
               onChange={(e) =>
                 setCustomerInfo((prev) => ({ ...prev, tenKhach: e.target.value }))
               }
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500"
             />
             {showCustomerSuggestions && customerSuggestions.length > 0 && (
               <div className="mt-2 max-h-32 overflow-y-auto rounded-xl border border-slate-200 bg-white">
@@ -209,7 +209,7 @@ export default function PosCreateOrderLayout({
                       });
                       setShowCustomerSuggestions(false);
                     }}
-                    className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-sky-50"
+                    className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-rose-50"
                   >
                     <p className="text-sm font-semibold text-slate-800">{c.tenKhach}</p>
                     <p className="text-xs text-slate-500">{c.soDienThoai || "-"}</p>
@@ -224,7 +224,7 @@ export default function PosCreateOrderLayout({
               }
               rows={2}
               placeholder="Ghi chú đơn..."
-              className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500"
+              className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500"
             />
           </div>
 
@@ -244,7 +244,7 @@ export default function PosCreateOrderLayout({
                   );
                 }}
                 placeholder="Tên hàng"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500"
               />
               <div className="grid grid-cols-3 gap-2">
                 <input
@@ -254,7 +254,7 @@ export default function PosCreateOrderLayout({
                     setNewProduct((prev) => ({ ...prev, donVi: e.target.value }))
                   }
                   placeholder="Đơn vị"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500"
                 />
                 <input
                   type="number"
@@ -267,7 +267,7 @@ export default function PosCreateOrderLayout({
                     }))
                   }
                   placeholder="SL"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500"
                 />
                 <input
                   type="text"
@@ -280,13 +280,13 @@ export default function PosCreateOrderLayout({
                     }));
                   }}
                   placeholder="Đơn giá"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500"
                 />
               </div>
               <button
                 type="button"
                 onClick={handleAddProduct}
-                className="w-full rounded-xl bg-sky-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-sky-700"
+                className="w-full rounded-xl bg-rose-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-rose-700"
               >
                 Thêm vào đơn
               </button>

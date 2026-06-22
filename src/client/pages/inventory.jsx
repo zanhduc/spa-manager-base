@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { toUsDate } from "../../core/dateUtils";
 import {
-  CACHE_INVALIDATED_EVENT,
   CACHE_KEYS,
   createInventoryReceipt,
   getNextInventoryReceiptDefaults,
@@ -9,8 +9,17 @@ import {
   getInventorySuggestions,
   getSupplierCatalog,
   formatAllSheets,
+  clearReadCacheByKeys,
 } from "../api";
 import { runInBackground } from "../api/backgroundApi";
+import { readCache } from "../api/localCache.js";
+import { hasCachedResponse, readCachedList } from "../utils/cacheBootstrap.js";
+import { useCacheSync } from "../hooks/useCacheSync.js";
+import { enrichInventorySuggestions } from "../utils/inventoryCacheHelpers.js";
+import {
+  validateInventoryLineItem,
+  validateInventoryReceipt,
+} from "../utils/inventoryValidators.js";
 import { normalizeText as foldText } from "../../core/core";
 
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
@@ -26,27 +35,11 @@ const toTitleCase = (str) => {
 
 const RECEIPT_STATUS = {
   PAID: "\u0110\u00e3 thanh to\u00e1n",
-  PARTIAL: "Tr\u1ea3 m\u1ed9t ph\u1ea7n",
-  DEBT: "N\u1ee3",
 };
 
-const RECEIPT_STATUS_OPTIONS = [
-  RECEIPT_STATUS.PAID,
-  RECEIPT_STATUS.PARTIAL,
-  RECEIPT_STATUS.DEBT,
-];
+const getTodayInputDate = () => toUsDate(new Date());
 
-const getTodayInputDate = () => {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-  return local.toISOString().split("T")[0];
-};
-
-const getReceiptStatusCode = (status) => {
-  if (status === RECEIPT_STATUS.PARTIAL) return "PARTIAL";
-  if (status === RECEIPT_STATUS.DEBT) return "DEBT";
-  return "PAID";
-};
+const getReceiptStatusCode = () => "PAID";
 
 const createInitialReceiptInfo = () => ({
   maPhieu: "",
@@ -413,11 +406,17 @@ function SupplierInfoSection({
 }
 
 export default function InventoryPage({ user }) {
-  const [productSuggestions, setProductSuggestions] = useState([]);
-  const [supplierCatalog, setSupplierCatalog] = useState([]);
+  const [productSuggestions, setProductSuggestions] = useState(() =>
+    readCachedList(CACHE_KEYS.inventorySuggestions),
+  );
+  const [supplierCatalog, setSupplierCatalog] = useState(() =>
+    readCachedList(CACHE_KEYS.supplierCatalog),
+  );
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
   const [products, setProducts] = useState([]);
-  const [productCatalog, setProductCatalog] = useState([]);
+  const [productCatalog, setProductCatalog] = useState(() =>
+    readCachedList(CACHE_KEYS.productCatalog),
+  );
   const [showImages, setShowImages] = useState(
     () => localStorage.getItem("show_product_images") !== "false"
   );
@@ -430,9 +429,9 @@ export default function InventoryPage({ user }) {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showProductSuggestions, setShowProductSuggestions] = useState(false);
-  const [isLoadingReceiptDefaults, setIsLoadingReceiptDefaults] =
-    useState(true);
+  const [isLoadingReceiptDefaults, setIsLoadingReceiptDefaults] = useState(false);
   const [errors, setErrors] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
 
   const [receiptInfo, setReceiptInfo] = useState(createInitialReceiptInfo);
 
@@ -446,12 +445,12 @@ export default function InventoryPage({ user }) {
     giaNhapChan: 0,
   });
 
-  const loadReceiptDefaults = async ({ silent = false } = {}) => {
+  const loadReceiptDefaults = async ({ silent = false, force = false } = {}) => {
     if (!silent) setIsLoadingReceiptDefaults(true);
     const today = getTodayInputDate();
 
     try {
-      const res = await getNextInventoryReceiptDefaults();
+      const res = await getNextInventoryReceiptDefaults({ force });
       const maPhieu = String(res?.data?.maPhieu || "").trim() || "NK01";
       const ngayNhap = String(res?.data?.ngayNhap || "").trim() || today;
 
@@ -471,10 +470,20 @@ export default function InventoryPage({ user }) {
     }
   };
 
-  const loadCatalogAndSuggestions = async () => {
+  const applyCatalogFromCache = useCallback(() => {
+    const catalog = readCache(CACHE_KEYS.productCatalog)?.response?.data;
+    const suggestions = readCache(CACHE_KEYS.inventorySuggestions)?.response?.data;
+    const catalogRows = Array.isArray(catalog) ? catalog : readCachedList(CACHE_KEYS.productCatalog);
+    if (catalogRows.length) setProductCatalog(catalogRows);
+    if (Array.isArray(suggestions)) {
+      setProductSuggestions(enrichInventorySuggestions(catalogRows, suggestions));
+    }
+  }, []);
+
+  const loadCatalogAndSuggestions = async ({ force = false } = {}) => {
     const [catRes, sugRes] = await Promise.all([
-      getProductCatalog(),
-      getInventorySuggestions(),
+      getProductCatalog({ force }),
+      getInventorySuggestions({ force }),
     ]);
     let catalog = [];
     if (catRes?.success && Array.isArray(catRes.data)) {
@@ -482,48 +491,92 @@ export default function InventoryPage({ user }) {
       setProductCatalog(catalog);
     }
     if (sugRes?.success && Array.isArray(sugRes.data)) {
-      const suggestionsWithImages = sugRes.data.map((s) => {
-        const match = catalog.find(
-          (c) => foldText(c.tenSanPham) === foldText(s.tenSanPham),
-        );
-        return { ...s, anhSanPham: match ? match.anhSanPham : "" };
-      });
-      setProductSuggestions(suggestionsWithImages);
+      setProductSuggestions(enrichInventorySuggestions(catalog, sugRes.data));
     }
   };
 
-  const loadSuppliers = async () => {
-    const res = await getSupplierCatalog();
+  const loadSuppliers = async ({ force = false } = {}) => {
+    const res = await getSupplierCatalog({ force });
     if (res?.success && Array.isArray(res.data)) {
       setSupplierCatalog(res.data);
     }
   };
 
-  useEffect(() => {
-    loadReceiptDefaults();
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadReceiptDefaults({ silent: true, force: true }),
+        loadCatalogAndSuggestions({ force: true }),
+        loadSuppliers({ force: true }),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
-    loadCatalogAndSuggestions().catch(() => {});
-    loadSuppliers().catch(() => {});
+  useEffect(() => {
+    void loadReceiptDefaults({ silent: true });
+    applyCatalogFromCache();
+    if (!hasCachedResponse(CACHE_KEYS.productCatalog)) {
+      loadCatalogAndSuggestions().catch(() => {});
+    }
+    if (!hasCachedResponse(CACHE_KEYS.supplierCatalog)) {
+      loadSuppliers().catch(() => {});
+    }
+  }, [applyCatalogFromCache]);
+
+  const applySuppliersFromCache = useCallback(() => {
+    const suppliers = readCache(CACHE_KEYS.supplierCatalog)?.response?.data;
+    if (Array.isArray(suppliers)) setSupplierCatalog(suppliers);
   }, []);
 
-  useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
+  useCacheSync({
+    cacheKeys: [
+      CACHE_KEYS.productCatalog,
+      CACHE_KEYS.inventorySuggestions,
+      CACHE_KEYS.supplierCatalog,
+    ],
+    onCacheUpdated: (detail, cacheKey) => {
+      const data = detail?.response?.data;
+      if (cacheKey === CACHE_KEYS.productCatalog && Array.isArray(data)) {
+        setProductCatalog(data);
+        const suggestions = readCache(CACHE_KEYS.inventorySuggestions)?.response?.data;
+        if (Array.isArray(suggestions)) {
+          setProductSuggestions(enrichInventorySuggestions(data, suggestions));
+        }
+        return;
+      }
+      if (cacheKey === CACHE_KEYS.inventorySuggestions && Array.isArray(data)) {
+        const catalog = readCache(CACHE_KEYS.productCatalog)?.response?.data;
+        const catalogRows = Array.isArray(catalog)
+          ? catalog
+          : readCachedList(CACHE_KEYS.productCatalog);
+        setProductSuggestions(enrichInventorySuggestions(catalogRows, data));
+        return;
+      }
+      if (cacheKey === CACHE_KEYS.supplierCatalog && Array.isArray(data)) {
+        setSupplierCatalog(data);
+      }
+    },
+    onCacheInvalidated: (keys) => {
       if (
         keys.includes(CACHE_KEYS.productCatalog) ||
         keys.includes(CACHE_KEYS.inventorySuggestions)
       ) {
-        loadCatalogAndSuggestions().catch(() => {});
+        applyCatalogFromCache();
+        if (!readCache(CACHE_KEYS.productCatalog)?.response) {
+          loadCatalogAndSuggestions().catch(() => {});
+        }
       }
       if (keys.includes(CACHE_KEYS.supplierCatalog)) {
-        loadSuppliers().catch(() => {});
+        applySuppliersFromCache();
+        if (!readCache(CACHE_KEYS.supplierCatalog)?.response) {
+          loadSuppliers().catch(() => {});
+        }
       }
-    };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-  }, []);
+    },
+  });
 
   const supplierSuggestions = supplierCatalog
     .filter((s) =>
@@ -546,34 +599,18 @@ export default function InventoryPage({ user }) {
   };
 
   const handleAddProduct = () => {
+    const validated = validateInventoryLineItem(newProduct, products);
+    if (!validated.ok) {
+      setErrors((p) => ({ ...p, ...validated.errors }));
+      return;
+    }
+
     const name = newProduct.tenSanPham.trim();
     const group = String(newProduct.nhomHang || "").trim();
-
     const donViChan = (newProduct.donViChan || "").trim();
     const donViLe = (newProduct.donViLe || "").trim();
     const qtyChan = Number(newProduct.soLuong) || 0;
     const priceChan = Number(newProduct.giaNhapChan) || 0;
-
-    const newErr = {};
-    if (!name) newErr.new_tenSanPham = "Chưa có tên hàng";
-    if (!donViChan) newErr.new_donViChan = "Cần đơn vị";
-    if (qtyChan <= 0) newErr.new_soLuong = "Sai SL";
-    if (qtyChan > 100000) newErr.new_soLuong = "Tối đa 100k";
-    if (priceChan <= 0) newErr.new_giaNhapChan = "Sai giá";
-
-    const isDuplicate = products.some(
-      (p) =>
-        p.tenSanPham.trim().toLowerCase() === name.toLowerCase() &&
-        p.donViChan.trim().toLowerCase() === donViChan.toLowerCase(),
-    );
-    if (isDuplicate) {
-      newErr.new_tenSanPham = "Hàng này đã có trong phiếu nhập";
-    }
-
-    if (Object.keys(newErr).length > 0) {
-      setErrors((p) => ({ ...p, ...newErr }));
-      return;
-    }
 
     setProducts((prev) => [
       {
@@ -608,7 +645,6 @@ export default function InventoryPage({ user }) {
       soLuong: 1,
       giaNhapChan: 0,
     });
-    toast.success("Đã thêm vào phiếu");
   };
 
   const handleUpdateProduct = (id, updated) => {
@@ -628,40 +664,28 @@ export default function InventoryPage({ user }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (isLoadingReceiptDefaults)
+    if (!String(receiptInfo.maPhieu || "").trim() && isLoadingReceiptDefaults) {
       return toast.error("Đang tải mã phiếu nhập mới, vui lòng chờ...");
-
-    const newErr = {};
-    if (!receiptInfo.nhaCungCap?.trim()) {
-      newErr.nhaCungCap = "Vui lòng nhập tên nhà cung cấp";
-    }
-    if (products.length === 0) {
-      toast.error("Vui lòng thêm sản phẩm vào phiếu nhập");
-      return;
     }
 
-    if (Object.keys(newErr).length > 0) {
-      setErrors(newErr);
+    const validated = validateInventoryReceipt(receiptInfo, products);
+    if (!validated.ok) {
+      if (validated.errors.products) {
+        toast.error(validated.errors.products);
+        return;
+      }
+      setErrors(validated.errors);
       toast.error("Vui lòng kiểm tra lại thông tin");
       return;
     }
 
     setErrors({});
-    if (receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL) {
-      const paid = Number(receiptInfo.soTienDaTra || 0);
-      if (paid <= 0) return toast.error("Vui lòng nhập số tiền đã trả trước");
-      if (paid > totalAmount)
-        return toast.error("Số tiền đã trả không được lớn hơn tổng phiếu nhập");
-    }
-
     const payload = {
       receiptInfo: {
         ...receiptInfo,
-        trangThaiCode: getReceiptStatusCode(receiptInfo.trangThai),
-        soTienDaTra:
-          receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL
-            ? Number(receiptInfo.soTienDaTra || 0)
-            : 0,
+        trangThai: RECEIPT_STATUS.PAID,
+        trangThaiCode: getReceiptStatusCode(RECEIPT_STATUS.PAID),
+        soTienDaTra: 0,
       },
       products: products.map((p) => ({
         ...p,
@@ -690,7 +714,7 @@ export default function InventoryPage({ user }) {
         }
         // Reload data in background
         Promise.all([
-          loadReceiptDefaults(),
+          loadReceiptDefaults({ silent: true }),
           loadCatalogAndSuggestions(),
           loadSuppliers(),
         ]).catch(() => {});
@@ -704,8 +728,8 @@ export default function InventoryPage({ user }) {
     } bg-white px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all`;
 
   return (
-    <main className="min-h-screen pb-24 bg-gradient-to-br from-slate-50 via-slate-50 to-emerald-50/30">
-      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
+    <main className="app-page pb-24 bg-gradient-to-br from-slate-50 via-slate-50 to-emerald-50/30">
+      <div className="app-shell pb-24">
         {/* Header */}
         <div className="mb-8 md:mb-10 animate-[fadeUp_0.4s_ease] max-w-3xl">
           <div className="inline-flex items-center gap-2 mb-4 md:mb-6">
@@ -714,7 +738,7 @@ export default function InventoryPage({ user }) {
           </div>
           <div className="mb-4 md:mb-6">
             <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-[1.15] md:leading-[1.2] pb-1 md:pb-2">
-              Nhập Hàng
+              Nhập kho spa
             </h1>
             <h2 className="text-4xl md:text-5xl font-black bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent leading-[1.15] md:leading-[1.2] pb-1">
               Chi Tiêu Gia Đình
@@ -723,6 +747,19 @@ export default function InventoryPage({ user }) {
           <p className="text-sm md:text-base text-slate-500 max-w-md leading-relaxed font-medium">
             Ghi nhận nhập hàng và chi tiêu gia đình theo cùng một luồng vận hành.
           </p>
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {refreshing ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-emerald-700/80 border-r-transparent" />
+              ) : null}
+              {refreshing ? "Đang tải..." : "Tải lại"}
+            </button>
+          </div>
         </div>
 
         {/* Form */}
@@ -801,36 +838,12 @@ export default function InventoryPage({ user }) {
                 />
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                    Trạng thái <span className="text-rose-500">*</span>
+                    Thanh toán
                   </label>
-                  <ReceiptStatusSelect
-                    value={receiptInfo.trangThai}
-                    onChange={(nextStatus) =>
-                      setReceiptInfo((prev) => ({
-                        ...prev,
-                        trangThai: nextStatus,
-                        soTienDaTra:
-                          nextStatus === RECEIPT_STATUS.PARTIAL
-                            ? prev.soTienDaTra
-                            : 0,
-                      }))
-                    }
-                  />
-                </div>
-                {receiptInfo.trangThai === RECEIPT_STATUS.PARTIAL && (
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-                      Đã trả trước
-                    </label>
-                    <CurrencyInput
-                      value={Number(receiptInfo.soTienDaTra || 0)}
-                      onChange={(v) =>
-                        setReceiptInfo((prev) => ({ ...prev, soTienDaTra: v }))
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
-                    />
+                  <div className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-700">
+                    Đã thanh toán toàn bộ
                   </div>
-                )}
+                </div>
                 <div className="sm:col-span-2">
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">
                     Ghi chú
@@ -869,7 +882,7 @@ export default function InventoryPage({ user }) {
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="Ví dụ: áo phông trắng, Quần jean..."
+                      placeholder="Ví dụ: Tinh dầu gừng, Muối thảo dược..."
                       value={newProduct.tenSanPham}
                       maxLength={200}
                       onFocus={() => setShowProductSuggestions(true)}
@@ -965,7 +978,7 @@ export default function InventoryPage({ user }) {
                                         </div>
                                       ) : null}
                                       <div className="flex-1 min-w-0">
-                                        <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">
+                                        <h4 className="font-bold text-slate-800 text-sm group-hover:text-rose-700 transition-colors truncate">
                                           {p.tenSanPham}
                                         </h4>
                                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
@@ -975,7 +988,7 @@ export default function InventoryPage({ user }) {
                                             {p.nhomHang}
                                           </span>
                                         )}
-                                        <span className="text-[10px] font-medium text-blue-600 flex items-center gap-1 uppercase tracking-wider">
+                                        <span className="text-[10px] font-medium text-rose-700 flex items-center gap-1 uppercase tracking-wider">
                                           <i className="ri-scales-line opacity-70" />
                                           {p.donViChan}
                                         </span>
@@ -1005,7 +1018,7 @@ export default function InventoryPage({ user }) {
                     </label>
                     <input
                       type="text"
-                      placeholder="Nước, Bánh kẹo..."
+                      placeholder="Tinh dầu, thảo dược, vật tư trị liệu..."
                       value={newProduct.nhomHang}
                       maxLength={50}
                       onChange={(e) =>

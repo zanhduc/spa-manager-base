@@ -2,6 +2,21 @@
  * Core business logic used by local mock adapter.
  */
 
+// Re-export date utils for backward compatibility
+export {
+  pad2,
+  toUsDate,
+  toUsDateTime,
+  parseUsDate,
+  parseUsDateTime,
+  compareDate,
+  isDateInRange,
+  toIsoDate,
+  getTimeMs,
+  formatToUsDate,
+  formatToVnDateTime,
+} from './dateUtils.js';
+
 /**
  * Build rows for DON_HANG sheet.
  * Columns:
@@ -128,16 +143,7 @@ export const moneyMeaning = (value) => {
 
 // --- Date Helpers ---
 
-export const pad2 = (n) => String(n).padStart(2, "0");
-
-export const toIsoDate = (v) => {
-  const raw = String(v || "").trim();
-  if (!raw) return "";
-  const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  return "";
-};
+// pad2, toIsoDate exported from dateUtils.js
 
 export const toLocalIso = (date) => {
   const y = date.getFullYear();

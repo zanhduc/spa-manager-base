@@ -1,30 +1,45 @@
 {
-    "name": "soanhang-congno",
-    "private": true,
-    "version": "1.0.0",
-    "type": "module",
-    "scripts": {
-        "dev": "vite",
-        "build:client": "vite build",
-        "build:server": "node esbuild.server.js",
-        "build": "npm run build:client && npm run build:server",
-        "push": "npm run build && clasp push",
-        "deploy:prod": "node --input-type=module -e \"import fs from 'node:fs'; const p='appsscript.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.webapp={...(j.webapp||{}),executeAs:'USER_DEPLOYING',access:'ANYONE_ANONYMOUS'}; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('appsscript webapp configured: USER_DEPLOYING + ANYONE_ANONYMOUS');\" && npm run build && clasp push && V=$(clasp version \"prod update $(date '+%F %T')\" | sed -E 's/.*Created version ([0-9]+).*/\\1/') && DID=${DEPLOYMENT_ID:-$(clasp deployments | sed -nE 's/^- ([^ ]+) @([0-9]+).*/\\1 \\2/p' | sort -k2,2nr | head -n1 | awk '{print $1}')} && if [ -z \"$DID\" ]; then echo \"ERROR: Khong tim thay deployment dang ton tai. Hay truyen DEPLOYMENT_ID.\"; exit 1; fi && echo \"Deploy to: $DID (version $V)\" && clasp deploy -i \"$DID\" -V \"$V\" -d \"prod\""
-    },
-    "dependencies": {
-        "firebase": "^12.12.1",
-        "react": "^18.2.0",
-        "react-dom": "^18.2.0",
-        "react-hot-toast": "^2.6.0"
-    },
-    "devDependencies": {
-        "@tailwindcss/postcss": "^4.2.3",
-        "@vitejs/plugin-react": "^4.0.0",
-        "autoprefixer": "^10.4.27",
-        "esbuild": "^0.20.0",
-        "postcss": "^8.5.6",
-        "tailwindcss": "^4.2.1",
-        "vite": "^5.0.0",
-        "vite-plugin-singlefile": "^0.13.0"
-    }
+  "name": "spa-manager",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:client": "vite build",
+    "build:server": "node esbuild.server.js",
+    "build": "npm run build:client && npm run build:server",
+    "audit:gas-api": "node scripts/audit-gas-api.cjs",
+    "audit:cache-bootstrap": "node scripts/audit-cache-bootstrap.cjs",
+    "encoding:guard": "node scripts/encoding-guard.mjs",
+    "test:unit": "vitest run --coverage",
+    "test:unit:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "push": "npm run build && clasp push",
+    "deploy:prod": "node deploy-prod.mjs"
+  },
+  "dependencies": {
+    "firebase": "^12.12.1",
+    "lucide-react": "^1.17.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.6.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@tailwindcss/postcss": "^4.2.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^4.0.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "autoprefixer": "^10.4.27",
+    "esbuild": "^0.20.0",
+    "jsdom": "^29.1.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.2.1",
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^0.13.0",
+    "vitest": "^4.1.5"
+  }
 }

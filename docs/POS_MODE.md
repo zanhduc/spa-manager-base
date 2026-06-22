@@ -45,7 +45,7 @@ App se nho che do da chon trong `localStorage`.
 - Thu ngan muon thao tac nhanh -> dung tab duoi:
   - Soan don
   - Lich su
-  - Cong no
+  - Tien trinh khach
   - Tu kiem tra in
 
 ## Luu y

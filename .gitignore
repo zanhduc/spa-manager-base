@@ -55,3 +55,10 @@ Thumbs.db
 # =========================
 *.tmp
 *.temp
+
+# =========================
+# Test artifacts
+# =========================
+coverage/
+playwright-report/
+test-results/

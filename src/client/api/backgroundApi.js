@@ -1,6 +1,5 @@
-import toast from "react-hot-toast"
-import { logAction } from "./index.js"
-
+import { logAction } from "./index.js";
+import { authLogout } from "../utils/authLogout.js";
 /**
  * Run a write API call in the background with optimistic UI.
  *
@@ -16,6 +15,49 @@ import { logAction } from "./index.js"
  * @param {string}        options.userName        - User name for Log sheet col B
  * @param {(result) => void} [options.onComplete] - Optional callback after API finishes
  */
+let isRunning = false;
+const backgroundQueue = [];
+
+async function processQueue() {
+  if (isRunning || backgroundQueue.length === 0) return;
+  isRunning = true;
+
+  while (backgroundQueue.length > 0) {
+    const task = backgroundQueue.shift();
+    try {
+      const result = await task.apiCall();
+      const isSuccess = result?.success !== false;
+      
+      if (result?.code === "UNAUTHORIZED") {
+        authLogout();
+      }
+      
+      logAction({
+        userName: task.userName || "unknown",
+        changeDescription: task.changeDescription || "",
+        status: isSuccess ? "SUCCESS" : "ERROR",
+        errorMessage: isSuccess ? "" : (result?.message || "API trả về lỗi"),
+      }).catch(() => {});
+
+      if (task.onComplete) task.onComplete(result);
+    } catch (err) {
+      logAction({
+        userName: task.userName || "unknown",
+        changeDescription: task.changeDescription || "",
+        status: "ERROR",
+        errorMessage: err?.message || String(err) || "Lỗi không xác định",
+      }).catch(() => {});
+
+      if (task.onComplete) task.onComplete({ success: false, message: err?.message });
+    }
+
+    // Debounce / Throttling delay to prevent GAS Rate Limit (Rule 16)
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  isRunning = false;
+}
+
 export function runInBackground({
   apiCall,
   successMessage,
@@ -23,37 +65,7 @@ export function runInBackground({
   userName,
   onComplete,
 }) {
-  // 1. Show success toast immediately
-  toast.success(successMessage || "Thành công!")
-
-  // 2. Run API in background — fire and forget
-  Promise.resolve()
-    .then(() => apiCall())
-    .then((result) => {
-      // 3a. Log SUCCESS
-      const isSuccess = result?.success !== false
-      logAction({
-        userName: userName || "unknown",
-        changeDescription: changeDescription || "",
-        status: isSuccess ? "SUCCESS" : "ERROR",
-        errorMessage: isSuccess ? "" : (result?.message || "API trả về lỗi"),
-      }).catch(() => {
-        // Ignore log failures silently
-      })
-
-      if (onComplete) onComplete(result)
-    })
-    .catch((err) => {
-      // 3b. Log ERROR
-      logAction({
-        userName: userName || "unknown",
-        changeDescription: changeDescription || "",
-        status: "ERROR",
-        errorMessage: err?.message || String(err) || "Lỗi không xác định",
-      }).catch(() => {
-        // Ignore log failures silently
-      })
-
-      if (onComplete) onComplete({ success: false, message: err?.message })
-    })
+  backgroundQueue.push({ apiCall, changeDescription, userName, onComplete });
+  processQueue();
 }
+

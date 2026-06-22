@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  CACHE_INVALIDATED_EVENT,
   CACHE_KEYS,
   getOrderHistory,
-  getStayHistory,
+  getTreatmentHistory,
 } from "../api";
+import { readCache } from "../api/localCache.js";
+import { readCachedList } from "../utils/cacheBootstrap.js";
+import { useCacheSync } from "../hooks/useCacheSync.js";
 import toast from "react-hot-toast";
 import { getPreviewDataByKey } from "../utils/printStrategy";
 import { fireAndForgetPrintLog } from "../utils/printLogger";
@@ -43,37 +45,44 @@ export default function ReceiptPage({
   autoBack = false,
   dryRun = false,
 }) {
-  const [loading, setLoading] = useState(true);
-  const [order, setOrder] = useState(null);
+  const findOrderInCache = (orderCode) => {
+    const cached = readCache(CACHE_KEYS.orderHistory)?.response?.data;
+    const cachedOrders = Array.isArray(cached) ? cached : readCachedList(CACHE_KEYS.orderHistory);
+    return cachedOrders.find(
+      (o) => String(o.maPhieu || "").trim() === String(orderCode || "").trim(),
+    ) || null;
+  };
+
+  const [loading, setLoading] = useState(() => {
+    if (isPreview) return true;
+    return !findOrderInCache(code);
+  });
+  const [order, setOrder] = useState(() => findOrderInCache(code));
   const [currentSize, setCurrentSize] = useState(size || "58");
   const [didAutoPrint, setDidAutoPrint] = useState(false);
   const mapStayToReceiptOrder = (stay) => {
     if (!stay) return null;
-    const status = String(stay?.trangThaiLuuTru || "").toUpperCase();
+    const status = String(stay?.trangThaiPhien || "").toUpperCase();
     const statusText =
       status === "BOOKED"
-        ? "Đã đặt trước"
+        ? "Đã hẹn"
         : status === "IN_HOUSE"
-          ? "Đang ở"
+          ? "Đang trị liệu"
           : status === "CHECKED_OUT"
-            ? "Đã checkout"
+            ? "Đã kết thúc"
             : status === "CANCELLED"
               ? "Đã hủy"
-              : stay?.trangThaiLuuTru || "-";
+              : stay?.trangThaiPhien || "-";
     const serviceRows = Array.isArray(stay.serviceItems) ? stay.serviceItems : [];
-    const roomUnit = stay.hinhThucTinhGia === "THEO_GIO" ? "Giờ" : "Đêm";
-    const roomQty =
-      stay.hinhThucTinhGia === "THEO_GIO"
-        ? Number(stay.soGio || 0)
-        : Number(stay.soDem || 0);
+    const packageAmount = Math.max(Number(stay.tienGoi ?? 0), 0);
     const products = [
       {
-        tenSanPham: `Tiền phòng ${stay.maPhong || ""}`.trim(),
-        donVi: roomUnit,
-        soLuong: Math.max(1, roomQty || 1),
+        tenSanPham: String(stay.tenGoi || stay.tenDichVu || `Phiên trị liệu ${stay.maGiuong || ""}`).trim(),
+        donVi: "Gói",
+        soLuong: 1,
         giaVon: 0,
-        donGiaBan: Number(stay.donGiaPhongApDung || 0),
-        thanhTien: Number(stay.tienPhong || 0),
+        donGiaBan: packageAmount,
+        thanhTien: packageAmount,
       },
       ...serviceRows.map((item) => ({
         tenSanPham: item.tenSanPham,
@@ -85,20 +94,20 @@ export default function ReceiptPage({
       })),
     ];
     return {
-      maPhieu: stay.maLuuTru,
-      ngayBan: stay.checkinAt || "",
+      maPhieu: stay.maPhien,
+      ngayBan: stay.batDauAt || "",
       tenKhach: stay.tenKhach || "Khách ghé thăm",
       soDienThoai: stay.soDienThoai || "",
       ghiChu: stay.ghiChu || "-",
       trangThai: statusText,
       tongHoaDon: Number(stay.tongThanhToan || 0),
-      tienNo: Math.max(Number(stay.canThuCheckout || 0), 0),
+      tienNo: Math.max(Number(stay.tongThanhToan || 0), 0),
       products,
     };
   };
 
-  const loadReceiptData = async (retryCount = 0) => {
-    setLoading(true);
+  const loadReceiptData = async (retryCount = 0, { silent = false } = {}) => {
+    if (!silent && !order) setLoading(true);
 
     if (isPreview) {
       const parsedPreview = tryParsePreviewData();
@@ -134,11 +143,11 @@ export default function ReceiptPage({
           });
           setLoading(false);
         } else {
-          const stayRes = await getStayHistory({ keyword: String(code || "") });
+          const stayRes = await getTreatmentHistory({ keyword: String(code || "") });
           if (stayRes?.success && Array.isArray(stayRes.data)) {
             const foundStay = stayRes.data.find(
               (s) =>
-                String(s.maLuuTru || "").trim() === String(code || "").trim(),
+                String(s.maPhien || "").trim() === String(code || "").trim(),
             );
             if (foundStay) {
               const mapped = mapStayToReceiptOrder(foundStay);
@@ -219,21 +228,42 @@ export default function ReceiptPage({
   };
 
   useEffect(() => {
-    if (code) loadReceiptData();
+    if (!code) return;
+    if (isPreview) {
+      loadReceiptData();
+      return;
+    }
+    const cached = findOrderInCache(code);
+    if (cached) {
+      setOrder(cached);
+      setLoading(false);
+      loadReceiptData(0, { silent: true });
+      return;
+    }
+    loadReceiptData();
   }, [code, isPreview, previewDataStr, previewDataKey]);
 
-  useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
-      if (!keys.includes(CACHE_KEYS.orderHistory)) return;
+  useCacheSync({
+    cacheKeys: [CACHE_KEYS.orderHistory],
+    onCacheUpdated: () => {
       if (!code) return;
-      loadReceiptData();
-    };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-  }, [code, isPreview, previewDataStr, previewDataKey]);
+      const cached = findOrderInCache(code);
+      if (cached) {
+        setOrder(cached);
+        setLoading(false);
+      }
+    },
+    onCacheInvalidated: () => {
+      if (!code) return;
+      const cached = findOrderInCache(code);
+      if (cached) {
+        setOrder(cached);
+        setLoading(false);
+        return;
+      }
+      loadReceiptData(0, { silent: true });
+    },
+  });
 
   const view = useMemo(() => {
     if (!order) return null;
@@ -328,7 +358,7 @@ export default function ReceiptPage({
   };
 
   return (
-    <main className="min-h-screen bg-slate-100 py-6">
+    <main className="app-page bg-slate-100 py-6">
       <style>{`
         @page { size: ${paperWidth} auto; margin: ${paperMargin}; }
         .thermal-receipt {
@@ -366,7 +396,7 @@ export default function ReceiptPage({
         }
       `}</style>
 
-      <div className="no-print mx-auto mb-4 flex w-full max-w-[520px] items-center justify-between px-4">
+      <div className="no-print app-shell app-shell--compact mb-4 flex w-full items-center justify-between px-1">
         <div className="flex flex-col gap-1.5">
           <div className="text-sm font-bold text-slate-800">
             In phiếu: <span className="text-rose-600">{code || "-"}</span>
@@ -499,7 +529,7 @@ export default function ReceiptPage({
                 </div>
                 {view.tienNo > 0 && (
                   <div className="thermal-row">
-                    <span>Còn nợ</span>
+                    <span>Cần thu thêm</span>
                     <strong className="thermal-right">{fmt(view.tienNo)}</strong>
                   </div>
                 )}
@@ -636,7 +666,7 @@ export default function ReceiptPage({
                   </div>
                   {view.tienNo > 0 && (
                     <div className="flex justify-between text-sm mt-2">
-                      <span className="text-slate-500">Còn nợ</span>
+                      <span className="text-slate-500">Cần thu thêm</span>
                       <strong>{fmt(view.tienNo)}</strong>
                     </div>
                   )}

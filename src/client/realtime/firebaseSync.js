@@ -1,9 +1,13 @@
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import {
+  collection,
   doc,
   getFirestore,
+  limitToLast,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
@@ -12,7 +16,9 @@ const AUTH_USER_STORAGE_KEY = "soanhang.auth.user";
 const SESSION_STORAGE_KEY = "soanhang.realtime.session_id";
 const LAST_SIGNAL_STORAGE_PREFIX = "soanhang.realtime.last_signal:";
 const SIGNAL_COLLECTION = "soanhang_sync_signals";
+const SIGNAL_SUBCOLLECTION = "events";
 const SIGNAL_KEY_CARRY_WINDOW_MS = 20000;
+const SIGNAL_QUERY_LIMIT = 80;
 
 let singleton = null;
 
@@ -158,7 +164,12 @@ function getSingleton() {
       db,
       projectKey,
       sessionId,
-      signalRef: doc(db, SIGNAL_COLLECTION, projectKey),
+      signalEventsRef: collection(db, SIGNAL_COLLECTION, projectKey, SIGNAL_SUBCOLLECTION),
+      signalQueryRef: query(
+        collection(db, SIGNAL_COLLECTION, projectKey, SIGNAL_SUBCOLLECTION),
+        orderBy("updatedAtMs", "asc"),
+        limitToLast(SIGNAL_QUERY_LIMIT),
+      ),
       lastSeenSignalId: persistedLastSignalId,
       recentInvalidateEntries: [],
     };
@@ -173,11 +184,58 @@ function getSingleton() {
   }
 }
 
-function buildSignalId(data) {
-  const nonce = String(data?.nonce || "").trim();
+function parseSignalId(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return { updatedAtMs: 0, nonce: "" };
+  let match = value.match(/^(\d{10,})[:|-](.+)$/);
+  if (match) {
+    return {
+      updatedAtMs: Number(match[1] || 0),
+      nonce: String(match[2] || ""),
+    };
+  }
+  match = value.match(/^(.+)[:|-](\d{10,})$/);
+  if (match) {
+    return {
+      updatedAtMs: Number(match[2] || 0),
+      nonce: String(match[1] || ""),
+    };
+  }
+  return { updatedAtMs: 0, nonce: value };
+}
+
+export function buildSignalId(data) {
+  const nonce = String(data?.nonce || data?.signalId || "").trim();
   const ts = Number(data?.updatedAtMs || 0);
   if (!nonce && !ts) return "";
-  return `${nonce}:${ts}`;
+  if (ts > 0 && nonce) return `${ts}:${nonce}`;
+  if (ts > 0) return `${ts}:signal`;
+  return nonce;
+}
+
+export function isSignalIdAfter(nextSignalId, prevSignalId) {
+  const next = parseSignalId(nextSignalId);
+  const prev = parseSignalId(prevSignalId);
+  if (next.updatedAtMs !== prev.updatedAtMs) {
+    return next.updatedAtMs > prev.updatedAtMs;
+  }
+  return String(next.nonce || "").localeCompare(String(prev.nonce || ""), "en") > 0;
+}
+
+function readSignalFromSnapshot(docSnap) {
+  const data = docSnap?.data?.() || {};
+  const signalId = String(data.signalId || docSnap?.id || buildSignalId(data)).trim();
+  if (!signalId) return null;
+  return {
+    signalId,
+    mutation: String(data.mutation || "").trim(),
+    invalidateKeys: Array.isArray(data.invalidateKeys)
+      ? data.invalidateKeys.map((k) => String(k || "").trim()).filter(Boolean)
+      : [],
+    actorEmail: String(data.actorEmail || "").trim(),
+    actorSessionId: String(data.actorSessionId || "").trim(),
+    updatedAtMs: Number(data.updatedAtMs || 0),
+  };
 }
 
 function mergeRecentInvalidateKeys(state, keys = []) {
@@ -243,9 +301,10 @@ export async function publishRealtimeMutationSignal(meta = {}) {
     mutation: String(meta.mutation || "").trim().slice(0, 120),
     invalidateKeys,
   };
+  signal.signalId = buildSignalId(signal);
 
-  await setDoc(state.signalRef, signal, { merge: true });
-  state.lastSeenSignalId = buildSignalId(signal);
+  await setDoc(doc(state.signalEventsRef, signal.signalId), signal, { merge: false });
+  state.lastSeenSignalId = signal.signalId;
   persistLastSignalId(state.projectKey, state.lastSeenSignalId);
   return { success: true };
 }
@@ -269,51 +328,50 @@ export function startRealtimeSyncListener({ onRemoteSignal, onReady, onError }) 
       }
       if (typeof onReady === "function") onReady();
       stop = onSnapshot(
-        state.signalRef,
+        state.signalQueryRef,
         (snap) => {
-          const data = snap?.data();
-          if (!data) return;
-          const signalId = buildSignalId(data);
-          if (!signalId) return;
+          const signals = Array.isArray(snap?.docs)
+            ? snap.docs.map((docSnap) => readSignalFromSnapshot(docSnap)).filter(Boolean)
+            : [];
+          if (!signals.length) return;
+
+          const processSignals = (prevSignalId) => {
+            let newestSeenSignalId = prevSignalId;
+            signals.forEach((signal) => {
+              if (!isSignalIdAfter(signal.signalId, prevSignalId)) return;
+              if (isSignalIdAfter(signal.signalId, newestSeenSignalId)) {
+                newestSeenSignalId = signal.signalId;
+              }
+              if (signal.actorSessionId === state.sessionId) return;
+              onRemoteSignal({
+                mutation: signal.mutation,
+                invalidateKeys: signal.invalidateKeys,
+                actorEmail: signal.actorEmail,
+                updatedAtMs: signal.updatedAtMs,
+              });
+            });
+            if (newestSeenSignalId !== state.lastSeenSignalId) {
+              state.lastSeenSignalId = newestSeenSignalId;
+              persistLastSignalId(state.projectKey, newestSeenSignalId);
+            }
+          };
 
           if (skipFirst) {
             skipFirst = false;
             const prevSignalId = state.lastSeenSignalId;
-            state.lastSeenSignalId = signalId;
-            persistLastSignalId(state.projectKey, signalId);
-            if (
-              signalId !== prevSignalId &&
-              String(data.actorSessionId || "") !== state.sessionId
-            ) {
-              onRemoteSignal({
-                mutation: String(data.mutation || ""),
-                invalidateKeys: Array.isArray(data.invalidateKeys)
-                  ? data.invalidateKeys
-                      .map((k) => String(k || "").trim())
-                      .filter(Boolean)
-                  : [],
-                actorEmail: String(data.actorEmail || ""),
-                updatedAtMs: Number(data.updatedAtMs || 0),
-              });
+            const latestSignalId = signals[signals.length - 1]?.signalId || "";
+            if (!prevSignalId) {
+              state.lastSeenSignalId = latestSignalId;
+              persistLastSignalId(state.projectKey, latestSignalId);
+              return;
             }
+
+            processSignals(prevSignalId);
             return;
           }
 
-          if (signalId === state.lastSeenSignalId) return;
-          state.lastSeenSignalId = signalId;
-          persistLastSignalId(state.projectKey, signalId);
-          if (String(data.actorSessionId || "") === state.sessionId) return;
-
-          onRemoteSignal({
-            mutation: String(data.mutation || ""),
-            invalidateKeys: Array.isArray(data.invalidateKeys)
-              ? data.invalidateKeys
-                  .map((k) => String(k || "").trim())
-                  .filter(Boolean)
-              : [],
-            actorEmail: String(data.actorEmail || ""),
-            updatedAtMs: Number(data.updatedAtMs || 0),
-          });
+          const prevSignalId = state.lastSeenSignalId;
+          processSignals(prevSignalId);
         },
         () => {
           if (typeof onError === "function") {

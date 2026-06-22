@@ -1,1 +1,68 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    --app-shell-max: 1840px;
+    --app-shell-max-compact: 1120px;
+    --app-shell-max-pos: 1860px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
+@layer components {
+  .app-page {
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding-inline: clamp(12px, 1.8vw, 28px);
+    padding-top: clamp(14px, 1.6vw, 26px);
+    padding-bottom: clamp(20px, 2.4vw, 38px);
+  }
+
+  .app-shell {
+    width: 100%;
+    max-width: var(--app-shell-max);
+    margin-inline: auto;
+  }
+
+  .app-shell--compact {
+    max-width: var(--app-shell-max-compact);
+  }
+
+  .app-shell--pos {
+    max-width: var(--app-shell-max-pos);
+  }
+
+  .app-grid-adaptive {
+    display: grid;
+    gap: clamp(12px, 1.1vw, 18px);
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  @media (min-width: 768px) {
+    .app-grid-adaptive {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1440px) {
+    .app-grid-adaptive {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1920px) {
+    .app-page {
+      padding-inline: clamp(20px, 2.2vw, 44px);
+    }
+  }
+}

@@ -74,7 +74,7 @@ export default function ImageUploader({
       if (!res?.success) throw new Error(res?.message || "Upload thất bại");
       onUploaded(res.data.url);
       setPreview(null);
-      toast.success("Upload ảnh thành công!", { id: toastId });
+      toast.dismiss(toastId);
     } catch (err) {
       toast.error(err.message || "Upload ảnh thất bại", { id: toastId });
       setPreview(null);
@@ -177,7 +177,7 @@ export default function ImageUploader({
       }
       onUploaded(res.data.url);
       setPreview(null);
-      toast.success("Upload ảnh thành công!", { id: toastId });
+      toast.dismiss(toastId);
     } catch (err) {
       toast.error(err.message || "Upload ảnh thất bại", { id: toastId });
       setPreview(null);
@@ -246,7 +246,7 @@ export default function ImageUploader({
           {uploading ? "Đang xử lý..." : "📷 Chụp ảnh Camera"}
         </button>
         <label
-          className={`cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors text-center shadow-sm ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+          className={`cursor-pointer rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition-colors text-center shadow-sm ${uploading ? "opacity-50 pointer-events-none" : ""}`}
         >
           {uploading ? "Đang xử lý..." : "🖼️ Chọn Từ Thư Viện"}
           <input

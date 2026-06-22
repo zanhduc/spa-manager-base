@@ -58,6 +58,55 @@ export default defineConfig(({ mode }) => {
           });
         },
       },
+      {
+        name: "vietqr-proxy",
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (!req.url.startsWith("/vietqr-proxy")) return next();
+
+            const targetPath = req.url.replace(/^\/vietqr-proxy/, "");
+            const target = `https://api.vietqr.io${targetPath}`;
+            const chunks = [];
+
+            req.on("data", (chunk) => chunks.push(chunk));
+            req.on("end", () => {
+              const body = Buffer.concat(chunks);
+              const headers = { ...req.headers, host: "api.vietqr.io" };
+              delete headers.origin;
+              delete headers.referer;
+
+              const proxyReq = https.request(
+                target,
+                {
+                  method: req.method,
+                  headers,
+                },
+                (proxyRes) => {
+                  const responseChunks = [];
+                  proxyRes.on("data", (chunk) => responseChunks.push(chunk));
+                  proxyRes.on("end", () => {
+                    res.setHeader("Access-Control-Allow-Origin", "*");
+                    res.statusCode = proxyRes.statusCode || 200;
+                    Object.entries(proxyRes.headers || {}).forEach(([key, value]) => {
+                      if (value !== undefined) res.setHeader(key, value);
+                    });
+                    res.end(Buffer.concat(responseChunks));
+                  });
+                },
+              );
+
+              proxyReq.on("error", (error) => {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ code: "99", desc: error.message }));
+              });
+
+              if (body.length) proxyReq.write(body);
+              proxyReq.end();
+            });
+          });
+        },
+      },
     ],
     build: {
       outDir: "dist",

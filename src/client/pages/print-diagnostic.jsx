@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import { useConfirm } from "../components/ConfirmDialog";
 import {
   getPrintBridgeLogs,
   getPrintBridgeMetrics,
@@ -62,6 +63,7 @@ function buildBridgeEndpointCandidates(rawEndpoint) {
 }
 
 export default function PrintDiagnosticPage() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [bridgeConfig, setBridgeConfig] = useState(() => readPrintBridgeConfig());
   const [logs, setLogs] = useState(() => [
     `[${nowStr()}] Mở trang tự kiểm tra in.`,
@@ -117,7 +119,6 @@ export default function PrintDiagnosticPage() {
     setBridgeConfig(saved);
     if (!options.silent) {
       addLog("Đã lưu cấu hình in.");
-      toast.success("Đã lưu cấu hình in.");
     }
     return saved;
   };
@@ -150,9 +151,9 @@ export default function PrintDiagnosticPage() {
     addLog(`Bridge printerAddress: ${bridgeConfig.printerAddress || "(mặc định bridge)"}`);
     addLog(`Bridge token: ${bridgeConfig.token ? "Đã bật" : "Chưa bật"}`);
     if (envInfo.inIframe) {
-      addLog("Cảnh báo: đang chạy trong iframe, một số máy POS/webview có thể chặn gọi localhost.");
+      addLog("Cảnh báo: đang chạy trong iframe, một số máy quầy/webview có thể chặn gọi localhost.");
     }
-    toast.success("Đã chạy kiểm tra nhanh.");
+    addLog("Hoàn tất kiểm tra nhanh.");
   };
 
   const testBridgePing = async () => {
@@ -161,7 +162,6 @@ export default function PrintDiagnosticPage() {
         const saved = saveBridgeConfig({ silent: true });
         await pingPrintBridge(saved.endpoint, saved.token);
         addLog("Bridge health: OK.");
-        toast.success("Bridge đang hoạt động.");
       } catch (e) {
         const rawError = String(e?.message || e);
         addLog(`Bridge health: FAIL (${rawError})`);
@@ -186,7 +186,7 @@ export default function PrintDiagnosticPage() {
           toast("Bridge không trả danh sách máy in.", { icon: "⚠️" });
           return;
         }
-        toast.success("Đã lấy danh sách máy in.");
+        addLog("Đã lấy danh sách máy in.");
       } catch (e) {
         addLog(`Không lấy được danh sách máy in (${String(e?.message || e)})`);
         toast.error("Lấy danh sách máy in thất bại.");
@@ -209,7 +209,7 @@ export default function PrintDiagnosticPage() {
         } else {
           addLog("Bridge logs: trống.");
         }
-        toast.success("Đã đọc metrics/logs từ bridge.");
+        addLog("Đã đọc metrics/logs từ bridge.");
       } catch (e) {
         addLog(`Không đọc được metrics/logs (${String(e?.message || e)})`);
         toast.error("Không đọc được metrics/logs.");
@@ -240,9 +240,12 @@ export default function PrintDiagnosticPage() {
   };
 
   const openRealPrint = async (size) => {
-    const ok = window.confirm(
-      `Chạy test in thật ${size}mm sẽ gửi lệnh in trực tiếp qua Bridge.\nBạn muốn tiếp tục?`,
-    );
+    const ok = await confirm({
+      message: `Chạy test in thật ${size}mm sẽ gửi lệnh in trực tiếp qua Bridge.`,
+      subMessage: "Bạn muốn tiếp tục?",
+      yesLabel: "In thật",
+      yesStyle: "warning",
+    });
     if (!ok) return;
     await withBusy(`real-${size}`, async () => {
       saveBridgeConfig({ silent: true });
@@ -280,19 +283,20 @@ export default function PrintDiagnosticPage() {
     ].join("\n");
     try {
       await navigator.clipboard.writeText(content);
-      toast.success("Đã copy log.");
+      addLog("Đã copy log ra clipboard.");
     } catch (e) {
       toast.error("Không copy được log. Hãy copy thủ công.");
     }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white px-3 py-4 md:px-6 md:py-6">
-      <div className="mx-auto max-w-4xl space-y-4">
+    <main className="app-page bg-gradient-to-b from-slate-100 via-slate-50 to-white pb-24">
+      {confirmDialog}
+      <div className="app-shell app-shell--compact space-y-4">
         <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 shadow-sm">
           <h1 className="text-lg font-black text-slate-900">Tự kiểm tra in</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Dùng trang này để test luồng in trên máy POS và gửi log cho quản trị.
+            Dùng trang này để test luồng in trên máy quầy và gửi log cho quản trị.
           </p>
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
@@ -336,7 +340,7 @@ export default function PrintDiagnosticPage() {
               {endpointCandidates.map((candidate) => (
                 <span
                   key={candidate}
-                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700"
+                  className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700"
                 >
                   {candidate}
                 </span>
@@ -430,7 +434,7 @@ export default function PrintDiagnosticPage() {
                 type="button"
                 onClick={saveBridgeConfig}
                 disabled={Boolean(busyAction)}
-                className="h-11 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-11 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Lưu cấu hình in
               </button>
@@ -446,7 +450,7 @@ export default function PrintDiagnosticPage() {
                 type="button"
                 onClick={loadBridgePrinters}
                 disabled={Boolean(busyAction)}
-                className="h-11 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-11 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Lấy danh sách máy in
               </button>
@@ -454,7 +458,7 @@ export default function PrintDiagnosticPage() {
                 type="button"
                 onClick={loadBridgeMetrics}
                 disabled={Boolean(busyAction)}
-                className="h-11 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-11 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Đọc metrics/logs
               </button>
@@ -463,8 +467,8 @@ export default function PrintDiagnosticPage() {
               Luồng chuẩn: Ping bridge, lấy danh sách máy in, chọn máy in, lưu cấu hình in, rồi test in thật 58mm/80mm.
             </p>
             {bridgePrinters.length > 0 && (
-              <div className="mt-3 rounded-xl border border-cyan-200 bg-cyan-50/40 p-3">
-                <label className="block text-xs font-semibold text-cyan-700 mb-1">
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/40 p-3">
+                <label className="block text-xs font-semibold text-rose-700 mb-1">
                   Chọn máy in từ bridge (tên hoặc địa chỉ)
                 </label>
                 <select
@@ -485,7 +489,7 @@ export default function PrintDiagnosticPage() {
                       }));
                     }
                   }}
-                  className="w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-400"
+                  className="w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm outline-none focus:border-rose-400"
                 >
                   <option value="">(Mặc định hệ điều hành)</option>
                   {bridgePrinters.map((name) => (
@@ -494,7 +498,7 @@ export default function PrintDiagnosticPage() {
                     </option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-cyan-700">
+                <p className="mt-1 text-xs text-rose-700">
                   Nên chọn trực tiếp từ danh sách để tránh lệch tên/địa chỉ máy in.
                 </p>
               </div>
@@ -545,7 +549,7 @@ export default function PrintDiagnosticPage() {
               type="button"
               onClick={copyLogs}
               disabled={Boolean(busyAction)}
-              className="h-11 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-11 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Copy log
             </button>
@@ -578,7 +582,7 @@ export default function PrintDiagnosticPage() {
               <ul className="mt-2 list-disc pl-4 text-xs text-slate-700 space-y-1">
                 <li>Bật Bluetooth trước khi mở app Bridge.</li>
                 <li>Pair lại nếu bridge báo không thấy máy in.</li>
-                <li>Đặt máy in gần POS để giảm mất gói.</li>
+                <li>Đặt máy in gần máy quầy để giảm mất gói.</li>
                 <li>Tắt tiết kiệm pin cho app Bridge để tránh ngủ nền.</li>
               </ul>
             </div>

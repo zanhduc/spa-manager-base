@@ -117,8 +117,8 @@ const globalStyles = `
   :root {
     --bg: #f8fafc;
     --surface: #ffffff;
-    --primary: #2563eb;
-    --primary-hover: #1d4ed8;
+    --primary: #dc2626;
+    --primary-hover: #b91c1c;
     --text: #0f172a;
     --text-muted: #64748b;
     --border: #e2e8f0;
@@ -160,7 +160,7 @@ const globalStyles = `
 
   @keyframes pulseglow {
     0%, 100% { transform: translateY(0); filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
-    50% { transform: translateY(-2px); filter: drop-shadow(0 8px 16px rgba(37,99,235,0.4)); }
+    50% { transform: translateY(-2px); filter: drop-shadow(0 8px 16px rgba(220,38,38,0.35)); }
   }
 
   .spinner {

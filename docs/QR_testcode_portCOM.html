@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OXU QRVIEW — Test COM (legacy)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.5; color: #1e293b; }
+    .box { max-width: 720px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; }
+    a { color: #0369a1; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>OXU QRVIEW — trang test đã chuyển vào app</h1>
+    <p>
+      Trang test đầy đủ (nhập STK/số tiền → VietQR API → chuỗi EMVCo → gửi COM) nằm trong SPA:
+    </p>
+    <p><strong><a href="../index.html#/qr-oxu-test">Mở Test QR OXU trong app</a></strong></p>
+    <p>Hoặc từ menu: <code>Test QR OXU</code> (route <code>#qr-oxu-test</code>).</p>
+    <hr />
+    <h2>Tài liệu lệnh COM (115200 baud)</h2>
+    <ul>
+      <li><code>JUMP(1);</code> — màn hình QR</li>
+      <li><code>QBAR(0,&lt;payload&gt;);</code> — hiển thị QR (link hoặc chuỗi VietQR EMVCo)</li>
+      <li><code>SET_TXT(0,AGRIBANK);</code> — tên ngân hàng</li>
+      <li><code>SET_TXT(1,STK: 84593827363);</code> — số tài khoản</li>
+      <li><code>SET_TXT(2,230.000);</code> — số tiền hiển thị</li>
+      <li><code>BL(20);</code> — độ sáng 0–255</li>
+    </ul>
+    <p>Mỗi lệnh kết thúc bằng <code>\r\n</code> khi gửi qua Web Serial.</p>
+    <p>
+      VietQR payload: đăng ký API tại
+      <a href="https://my.vietqr.io" target="_blank" rel="noreferrer">my.vietqr.io</a>,
+      gọi <code>POST /v2/generate</code>, lấy <code>data.qrCode</code> thay cho <code>oxu.vn</code> trong
+      <code>QBAR(0,...)</code>.
+    </p>
+  </div>
+</body>
+</html>

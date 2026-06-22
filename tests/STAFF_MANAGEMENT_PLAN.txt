@@ -1,0 +1,263 @@
+KẾ HOẠCH QUẢN LÝ NHÂN SỰ — TLC SPA & DƯỠNG SINH
+================================================
+Nguồn: Quy trình HCNS (PDF) + phân tích code create-order.staff-modals.jsx
+Cập nhật: Toàn bộ scope Phase 1–5B.2c hoàn tất (2026-06-11)
+Phạm vi loại trừ (2026-06-11): Tuyển dụng, BHXH, tạm ứng — không triển khai trong scope này.
+
+────────────────────────────────────────────────
+I. HIỆN TRẠNG HỆ THỐNG (TRƯỚC PHASE 1)
+────────────────────────────────────────────────
+
+Popup StaffManageModal (danh mục NV):
+  - CRUD: mã, tên, trạng thái (Đang làm việc / Ngưng làm việc), ca mặc định, ghi chú
+  - Chặn xóa nếu NV còn phiên BOOKED hoặc IN_HOUSE
+  - Nằm sâu trong modal lịch ca trên màn điều phối
+
+Popup StaffScheduleModal (lịch ca 7 ngày):
+  - Lưới ca Sáng/Chiều/Tối (10-14 / 14-18 / 18-22)
+  - Gán nhanh full ca cả tuần
+  - Lưu qua updateSpaStaffSchedules
+
+Sheet NHAN_VIEN (GAS):
+  STT | maNhanVien | tenNhanVien | trangThai | caLamViec | ghiChu | updatedAt
+
+Sheet LICH_LAM_VIEC:
+  ngay | caSang | caChieu | caToi | updatedAt
+
+────────────────────────────────────────────────
+II. YÊU CẦU TỪ PDF — QUY TRÌNH HCNS
+────────────────────────────────────────────────
+
+1. Tuyển dụng: 8 bước, hồ sơ CV, phỏng vấn, thử việc, ký HĐ
+2. Đào tạo: Hội nhập 1 ngày + chuyên môn 3-7 ngày
+3. Chấm công – lương: Check in/out, lương + HH + KPI
+4. Vi phạm: Nhắc nhở → Khiển trách → Trừ thưởng → Đình chỉ → Chấm dứt HĐ
+
+Vị trí: Kỹ thuật viên, Lễ tân, Tư vấn viên, Quản lý, Marketing
+
+KPI KTV: Hài lòng KH, doanh số dịch vụ, tỷ lệ khách làm lại
+KPI Lễ tân: Tỷ lệ đặt lịch, KH quay lại
+KPI Quản lý: Doanh thu, giữ chân nhân sự
+
+────────────────────────────────────────────────
+III. GAP ANALYSIS
+────────────────────────────────────────────────
+
+| Yêu cầu              | Trước Phase 1     | Sau Phase 4       | Mức độ |
+|----------------------|-------------------|-------------------|--------|
+| Phân loại vai trò    | Không có          | Có                | Cao    |
+| Vòng đời NV          | 2 trạng thái      | 6 trạng thái      | Cao    |
+| Chấm công            | Không có          | Có                | Cao    |
+| Lịch ca tuần/tháng   | Popup 7 ngày      | Tab Lịch ca       | TB     |
+| KPI nhân viên        | Không có          | Có (KTV chính)    | TB     |
+| Checklist ca         | Không có          | Có                | TB     |
+| Bảng lương           | Không có          | Phase 5A          | Cao    |
+| Màn hình riêng       | Không có          | #staff-management | Cao    |
+
+────────────────────────────────────────────────
+IV. KIẾN TRÚC MỚI
+────────────────────────────────────────────────
+
+Route: #staff-management — Quản lý nhân sự
+
+Tabs:
+  [Danh sách] [Lịch ca] [Chấm công] [KPI] [Checklist ca] [Bảng lương] [Vi phạm]
+
+Create-order giữ popup "Lịch nhân viên" (xem/gán nhanh).
+CRUD nhân viên chuyển sang màn staff-management.
+
+Nguyên tắc (rule.md §8.1):
+  - UI/React tính lương và validate; GAS/localAdapter chỉ đọc/ghi sheet.
+  - Không validate nghiệp vụ lương ở adapter.
+
+────────────────────────────────────────────────
+V. PHASE 1 — NỀN TẢNG + MÀN HÌNH MỚI (HOÀN TẤT)
+────────────────────────────────────────────────
+
+1.1 Mở rộng data model NHAN_VIEN:
+  chucVu: KTV | LE_TAN | TU_VAN | QUAN_LY | MARKETING
+  trangThai: Thử việc | Đào tạo | Đang làm việc | Nghỉ phép | Tạm ngưng | Nghỉ việc
+  soDienThoai, ngayVaoLam (giữ caLamViec, ghiChu)
+
+1.2 File mới:
+  pages/staff-management.jsx
+  components/staff/staffConstants.js
+  components/staff/StaffCatalogPanel.jsx
+  components/staff/StaffSchedulePanel.jsx
+
+1.3 Routing:
+  useHashRouter.js → staff-management
+  app.jsx, FloatingMenu.jsx
+
+1.4 API:
+  gasAdapter.js — SPA_STAFF_HEADERS, normalize/map CRUD
+  localAdapter.js — mock fields
+  api/index.js — normalizeSpaStaff
+
+1.5 Create-order:
+  isBlockingStaffStatus từ staffConstants
+  Dropdown gán NV: ưu tiên KTV (+ NV đang gán sẵn)
+  Popup lịch ca: không còn CRUD NV lồng nhau, link sang #staff-management
+
+────────────────────────────────────────────────
+VI. PHASE 2 — CHẤM CÔNG (HOÀN TẤT)
+────────────────────────────────────────────────
+
+Sheet CHAM_CONG:
+  maNhanVien, ngay, checkInAt, checkOutAt, caDuKien, trangThai, ghiChu, updatedAt
+
+Tab Chấm công trên #staff-management?tab=attendance
+API: getSpaAttendance(filters), recordSpaAttendance(payload)
+UI validate: validateAttendanceAction(), getAttendanceButtonState()
+GAS/localAdapter: persistence-only (upsert theo maNhanVien + ngay + caDuKien)
+Actions: CHECK_IN, CHECK_OUT, MARK_ABSENT, CLEAR_ABSENT, UPDATE_NOTE
+Mỗi ca SANG/CHIEU/TOI chấm độc lập trong ngày
+
+File mới:
+  components/staff/StaffAttendancePanel.jsx
+
+────────────────────────────────────────────────
+VII. PHASE 3 — KPI (HOÀN TẤT)
+────────────────────────────────────────────────
+
+Tính client-side từ treatmentHistory (CHECKED_OUT) theo maNhanVien:
+  - Doanh số dịch vụ (tienDichVu), số phiên hoàn thành, tỷ lệ khách quay lại
+
+Tab KPI (#staff-management?tab=kpi) + bảng xếp hạng KTV.
+Helpers: components/staff/staffKpiHelpers.js
+UI: components/staff/StaffKpiPanel.jsx
+Tests: tests/staffKpi.test.js
+
+────────────────────────────────────────────────
+VIII. PHASE 4 — CHECKLIST ĐẦU/ CUỐI CA (HOÀN TẤT)
+────────────────────────────────────────────────
+
+Checklist theo vai trò (Lễ tân / KTV / Quản lý) từ PDF mục VIII.6-7.
+Sheet CHECKLIST_CA: maNhanVien, ngay, caDuKien, loaiChecklist, chucVu, itemsJson, ghiChu
+API: getSpaShiftChecklists(filters), saveSpaShiftChecklist(payload)
+Tab #staff-management?tab=checklist
+Helpers: components/staff/staffChecklistHelpers.js
+UI: components/staff/StaffChecklistPanel.jsx
+Tests: tests/staffChecklist.test.js
+
+────────────────────────────────────────────────
+IX. PHASE 5 — BẢNG LƯƠNG + HCNS NÂNG CAO
+────────────────────────────────────────────────
+
+Phase 5 tách 2 phần: 5A (ưu tiên — lương cơ bản + thưởng) và 5B (tùy chọn sau).
+
+────────────────────────────────────────────────
+IX.A PHASE 5A — BẢNG LƯƠNG: LƯƠNG CƠ BẢN + THƯỞNG (HOÀN TẤT)
+──────────────────────────────────────────────────────────────
+
+Mục tiêu (theo PDF mục II.3: Check in/out, lương + HH + KPI):
+  Tổng lương kỳ = Lương cơ bản thực nhận + Thưởng dịch vụ
+
+IX.A.1 Cấu hình trên danh mục nhân viên (sheet NHAN_VIEN — thêm cột):
+  luongCoBanThang     — Lương cơ bản tháng (VND), nhập trên form Danh sách NV
+  tyLeThuongDichVu    — % thưởng trên doanh số dịch vụ (0–100); để trống = dùng mặc định theo vai trò
+
+  Mặc định % thưởng theo vai trò (khi NV chưa cấu hình riêng):
+    KTV:       10%
+    LE_TAN:     5%
+    TU_VAN:     8%
+    QUAN_LY:    0%
+    MARKETING:  0%
+
+IX.A.2 Công thức tính (client-side, không sheet BANG_LUONG ở MVP):
+
+  A) Lương cơ bản thực nhận
+     - caKeHoach  = tổng ca được xếp trong LICH_LAM_VIEC trong kỳ (theo ngày, SANG/CHIEU/TOI)
+     - caHoanThanh = số ca CHAM_CONG có trạng thái "Đã ra ca" (hoặc có checkOutAt) trong kỳ
+     - Nếu caKeHoach > 0:
+         luongCoBan = luongCoBanThang × min(caHoanThanh / caKeHoach, 1)
+       (Vắng / chưa ra ca → không tính vào caHoanThanh → giảm lương cơ bản)
+     - Nếu caKeHoach = 0 nhưng caHoanThanh > 0:
+         luongCoBan = luongCoBanThang (cảnh báo UI: thiếu lịch ca trong kỳ)
+     - Nếu caHoanThanh = 0:
+         luongCoBan = 0
+
+  B) Thưởng dịch vụ
+     - doanhSoDichVu = tổng tienDichVu phiên CHECKED_OUT trong kỳ (dùng chung logic Phase 3 KPI)
+     - thuong = doanhSoDichVu × (tyLeThuongDichVu / 100)
+
+  C) Trừ vi phạm (Phase 5B — một phần)
+     - Tổng mucTru từ sheet VI_PHAM_NV, trạng thái AP_DUNG, ngày trong kỳ
+     - Chỉ biên bản có mucTru > 0 mới cộng vào truViPham
+
+  D) Tổng lương
+     - tongLuong = max(0, luongCoBan + thuong - truViPham)
+     - (Chưa trừ BHXH / tạm ứng — phần còn lại Phase 5B)
+
+IX.A.3 Nguồn dữ liệu
+  - NHAN_VIEN: luongCoBanThang, tyLeThuongDichVu
+  - LICH_LAM_VIEC: ca kế hoạch
+  - CHAM_CONG: ca hoàn thành
+  - PHIEN_DICH_VU (treatmentHistory): doanh số dịch vụ cho thưởng
+
+IX.A.4 UI
+  Tab #staff-management?tab=payroll
+  Chọn kỳ (tháng này / 30 ngày / tùy chỉnh), lọc vai trò
+  Bảng: NV | Ca HT/KH | Lương CB | Doanh số DV | % thưởng | Thưởng | Trừ VP | Tổng lương
+  Tổng hợp kỳ ở đầu trang
+
+IX.A.5 File mới / sửa
+  components/staff/staffPayrollHelpers.js
+  components/staff/StaffPayrollPanel.jsx
+  tests/staffPayroll.test.js
+  Mở rộng: staffConstants (form), StaffCatalogPanel, api normalizeSpaStaff, gas/local adapter headers
+
+IX.A.6 Phạm vi KHÔNG làm trong 5A
+  - Không sheet chốt lương / không khóa kỳ
+  - Không trừ BHXH, tạm ứng
+  - Không tính lương theo giờ thực tế (chỉ theo ca hoàn thành)
+  - Không xuất PDF phiếu lương
+
+────────────────────────────────────────────────
+IX.B PHASE 5B — VI PHẠM + HCNS NÂNG CAO (MỘT PHẦN HOÀN TẤT)
+────────────────────────────────────────────────
+
+IX.B.1 Biên bản vi phạm (HOÀN TẤT)
+  Sheet VI_PHAM_NV: maViPham, maNhanVien, ngay, capDo, noiDung, mucTru, trangThai, ghiChu, updatedAt
+  Mức xử lý: NHAC_NHO | KHIEN_TRACH | TRU_THUONG | DINH_CHI
+  Trạng thái: AP_DUNG | DA_HUY (hủy mềm, không xóa)
+  API: getSpaStaffViolations(filters), saveSpaStaffViolation(payload), cancelSpaStaffViolation({ maViPham })
+  Tab #staff-management?tab=violations
+  Helpers: components/staff/staffViolationHelpers.js
+  UI: components/staff/StaffViolationPanel.jsx
+  Tests: tests/staffViolation.test.js
+  Bảng lương tab payroll tự trừ truViPham từ biên bản AP_DUNG trong kỳ
+
+IX.B.2 Hoàn tất (2026-06-11)
+
+IX.B.2a Đơn nghỉ phép (HOÀN TẤT)
+  Sheet DON_NGHI_PHEP: maDon, maNhanVien, tuNgay, denNgay, lyDo, trangThai, ghiChu, updatedAt
+  Trạng thái: CHO_DUYET | DA_DUYET | TU_CHOI | DA_HUY
+  API: getSpaStaffLeaveRequests, saveSpaStaffLeaveRequest, reviewSpaStaffLeaveRequest
+  Tab #staff-management?tab=leave
+  Duyệt đơn trong ngày hiện tại → cập nhật NV sang trạng thái Nghỉ phép (UI)
+
+IX.B.2b Đào tạo (HOÀN TẤT)
+  Sheet DAO_TAO_NV: maDaoTao, maNhanVien, loaiDaoTao, tuNgay, denNgay, noiDung, trangThai, ghiChu
+  Loại: HOI_NHAP | CHUYEN_MON — Trạng thái: DA_LEN_LICH | HOAN_THANH | HUY
+  API: getSpaStaffTrainings, saveSpaStaffTraining
+  Tab #staff-management?tab=training
+
+IX.B.2c Chốt kỳ lương (HOÀN TẤT)
+  Sheet BANG_LUONG: maBangLuong, maKyLuong, tuNgay, denNgay, maNhanVien, chi tiết lương, trangThai DA_CHOT
+  API: getSpaPayrollRecords, lockSpaPayrollPeriod
+  Tab payroll: nút Chốt kỳ + in phiếu lương HTML sau khi chốt
+
+IX.B.3 Ngoài scope (không làm — quyết định 2026-06-11)
+  - Tuyển dụng (pipeline 8 bước PDF)
+  - BHXH, tạm ứng
+
+────────────────────────────────────────────────
+X. THỨ TỰ ƯU TIÊN
+────────────────────────────────────────────────
+
+Đã xong: Phase 1 → 2 → 3 → 4 → 5A → 5B.1 (vi phạm)
+
+Đã xong toàn bộ scope: Phase 1 → 5B.2c
+
+Bỏ qua (ngoài scope): Tuyển dụng, BHXH, tạm ứng

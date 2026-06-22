@@ -3,26 +3,27 @@ import { useHashRouter } from "./hooks/useHashRouter";
 import LoginPage from "./pages/login";
 import CreateOrderPage from "./pages/create-order";
 import HistoryPage from "./pages/history";
-import ReceiptPage from "./pages/receipt";
 import ProductsPage from "./pages/products";
+import TreatmentCatalogsPage from "./pages/treatment-catalogs";
 import InventoryPage from "./pages/inventory";
 import StockPage from "./pages/stock";
-import DebtPage from "./pages/debt";
+import CustomerProgressPage from "./components/customer-progress";
+import StaffManagementPage from "./pages/staff-management";
+import QrOxuTestPage from "./pages/qr-oxu-test";
 import StatsPage from "./pages/stats";
-import PrintDiagnosticPage from "./pages/print-diagnostic";
 import FloatingMenu from "./components/FloatingMenu";
 import GlobalNoticeBanner from "./components/GlobalNoticeBanner";
+import UpcomingAppointmentsBanner from "./components/UpcomingAppointmentsBanner.jsx";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import {
   DEVICE_TOKEN_SCOPE,
   DEVICE_TOKEN_STORAGE_KEY,
   UserProvider,
   useUser,
 } from "./context";
-import { Toaster } from "react-hot-toast";
-import { ensurePrintBridgeReady } from "./utils/printStrategy";
+import { Toaster, toast } from "react-hot-toast";
 import {
   applyAppModeToDom,
-  readAppMode,
   writeAppMode,
 } from "./utils/appMode";
 import {
@@ -30,8 +31,12 @@ import {
   clearReadCacheByKeys,
   getInvalidationKeysForMutation,
   loginWithDeviceToken,
+  loginWithHostAssertion,
+  loginWithSessionKey,
   getSyncVersion,
+  CACHE_UPDATED_EVENT,
 } from "./api";
+import { shouldToastRemoteCacheUpdate } from "./utils/cacheToastPolicy.js";
 import {
   isRealtimeSyncEnabled,
   startRealtimeSyncListener,
@@ -41,6 +46,12 @@ const REMOTE_SYNC_POLL_MS = 90000;
 const REALTIME_INVALIDATION_DEBOUNCE_MS = 180;
 const REALTIME_GUARD_POLL_COOLDOWN_MS = 10000;
 const REALTIME_POLL_DEDUP_WINDOW_MS = 1500;
+const HOST_ASSERTION_TTL_MS = 120000;
+const HOST_ASSERTION_MESSAGE_TYPES = new Set([
+  "gas.hostAssertionForIframe",
+  "gas.hostAssertion",
+  "gas.refreshAssertion",
+]);
 const markPerf = (name, detail = null) => {
   try {
     const perf = window.__SOANHANG_PERF__;
@@ -65,6 +76,35 @@ const getHashSearchParams = (hashValue) => {
     return new URLSearchParams(hash.slice(queryIndex + 1));
   }
   return new URLSearchParams(hash);
+};
+
+const normalizeOrigin = (value) => String(value || "").trim().replace(/\/+$/, "");
+
+const getReferrerOrigin = () => {
+  try {
+    if (!document.referrer) return "";
+    return normalizeOrigin(new URL(document.referrer).origin);
+  } catch (_) {
+    return "";
+  }
+};
+
+const getAllowedHostOrigins = () => {
+  const configured = String(import.meta.env.VITE_IFRAME_HOST_ORIGINS || "")
+    .split(",")
+    .map((item) => normalizeOrigin(item))
+    .filter(Boolean);
+  if (configured.length) return configured;
+  const referrerOrigin = getReferrerOrigin();
+  return referrerOrigin ? [referrerOrigin] : [];
+};
+
+const isAllowedHostOrigin = (origin) => {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  const allowed = getAllowedHostOrigins();
+  if (!allowed.length) return false;
+  return allowed.includes(normalized);
 };
 
 const buildPrintParams = (source) => {
@@ -133,7 +173,7 @@ function AppContent() {
   const { currentPath, navigate } = useHashRouter();
   const [initDone, setInitDone] = useState(false);
   const [printParams, setPrintParams] = useState(null);
-  const [appMode, setAppModeState] = useState(() => readAppMode());
+  const [appMode, setAppModeState] = useState("web");
   const [autoLoginChecked, setAutoLoginChecked] = useState(false);
   const [realtimeActive, setRealtimeActive] = useState(false);
   const [isPageVisible, setIsPageVisible] = useState(() => {
@@ -150,6 +190,8 @@ function AppContent() {
   const perfInitDoneLoggedRef = useRef(false);
   const perfUserReadyLoggedRef = useRef(false);
   const perfLoginVisibleLoggedRef = useRef(false);
+  const hostAssertionLoginInFlightRef = useRef(false);
+  const lastHostAssertionFingerprintRef = useRef("");
   const isPosMode = appMode === "pos";
 
   useEffect(() => {
@@ -201,6 +243,23 @@ function AppContent() {
   }, [currentPath, initDone, user]);
 
   useEffect(() => {
+    if (!user) return undefined;
+    const onCacheUpdated = (event) => {
+      const detail = event?.detail || {};
+      if (!shouldToastRemoteCacheUpdate(detail)) return;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      const cacheKey = String(detail.cacheKey || "").trim();
+      if (!cacheKey) return;
+      toast("Có dữ liệu mới được cập nhật", {
+        id: `remote-cache-${cacheKey}`,
+        duration: 2500,
+      });
+    };
+    window.addEventListener(CACHE_UPDATED_EVENT, onCacheUpdated);
+    return () => window.removeEventListener(CACHE_UPDATED_EVENT, onCacheUpdated);
+  }, [user]);
+
+  useEffect(() => {
     if (!realtimeActive) return;
     markPerf("realtime_listener_ready");
   }, [realtimeActive]);
@@ -231,27 +290,15 @@ function AppContent() {
     }, REALTIME_INVALIDATION_DEBOUNCE_MS);
   }, [flushPendingInvalidation]);
 
-  const setAppMode = useCallback((nextMode) => {
-    const next = writeAppMode(nextMode);
+  useEffect(() => {
+    const next = writeAppMode("web");
     setAppModeState(next);
+    applyAppModeToDom(next);
   }, []);
 
   useEffect(() => {
     applyAppModeToDom(appMode);
   }, [appMode]);
-
-  useEffect(() => {
-    const syncModeFromLocation = () => {
-      const next = readAppMode();
-      setAppModeState(next);
-    };
-    window.addEventListener("hashchange", syncModeFromLocation);
-    window.addEventListener("popstate", syncModeFromLocation);
-    return () => {
-      window.removeEventListener("hashchange", syncModeFromLocation);
-      window.removeEventListener("popstate", syncModeFromLocation);
-    };
-  }, []);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -315,13 +362,6 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
-    ensurePrintBridgeReady().catch(() => {
-      // Keep app usable; printing flow will show explicit error when user prints.
-    });
-  }, [user]);
-
-  useEffect(() => {
     if (!initDone) return;
     if (user) {
       setAutoLoginChecked(true);
@@ -334,21 +374,29 @@ function AppContent() {
       const token = String(
         localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) || "",
       ).trim();
-      if (!token) {
-        if (!cancelled) setAutoLoginChecked(true);
-        return;
-      }
       try {
-        const res = await loginWithDeviceToken(token, DEVICE_TOKEN_SCOPE);
-        if (cancelled) return;
-        if (res?.success && res?.data) {
-          const nextToken = String(res?.data?.deviceToken || token).trim();
-          if (nextToken) {
-            localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, nextToken);
+        if (token) {
+          const res = await loginWithDeviceToken(token, DEVICE_TOKEN_SCOPE);
+          if (cancelled) return;
+          if (res?.success && res?.data) {
+            const nextToken = String(res?.data?.deviceToken || token).trim();
+            if (nextToken) {
+              localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, nextToken);
+            }
+            setUser(res.data);
+            return;
           }
-          setUser(res.data);
-        } else {
           localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+        }
+
+        const sessionRes = await loginWithSessionKey(DEVICE_TOKEN_SCOPE);
+        if (cancelled) return;
+        if (sessionRes?.success && sessionRes?.data) {
+          const sessionToken = String(sessionRes?.data?.deviceToken || "").trim();
+          if (sessionToken) {
+            localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, sessionToken);
+          }
+          setUser(sessionRes.data);
         }
       } catch (_) {
         // Silent to avoid blocking manual login fallback.
@@ -362,6 +410,58 @@ function AppContent() {
       cancelled = true;
     };
   }, [autoLoginChecked, initDone, setUser, user]);
+
+  useEffect(() => {
+    if (!initDone) return;
+
+    const onHostAssertion = async (event) => {
+      if (user) return;
+      if (event.source === window) return;
+      if (!isAllowedHostOrigin(event.origin)) return;
+
+      const msg = event.data;
+      if (!msg || typeof msg !== "object") return;
+      if (!HOST_ASSERTION_MESSAGE_TYPES.has(String(msg.type || ""))) return;
+
+      const assertion = String(msg.assertion || "").trim();
+      const nonce = String(msg.nonce || "").trim();
+      const ts = Number(msg.ts || 0);
+      if (!assertion || !nonce || !Number.isFinite(ts)) return;
+      if (Math.abs(Date.now() - ts) > HOST_ASSERTION_TTL_MS) return;
+
+      const fingerprint = `${assertion}|${nonce}|${ts}`;
+      if (lastHostAssertionFingerprintRef.current === fingerprint) return;
+      if (hostAssertionLoginInFlightRef.current) return;
+
+      hostAssertionLoginInFlightRef.current = true;
+      try {
+        const res = await loginWithHostAssertion(
+          assertion,
+          DEVICE_TOKEN_SCOPE,
+          nonce,
+          ts,
+        );
+        if (res?.success && res?.data) {
+          const nextToken = String(res?.data?.deviceToken || "").trim();
+          if (nextToken) {
+            localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, nextToken);
+          }
+          lastHostAssertionFingerprintRef.current = fingerprint;
+          setUser(res.data);
+          setAutoLoginChecked(true);
+        }
+      } catch (_) {
+        // Keep silent to avoid interrupting manual login fallback.
+      } finally {
+        hostAssertionLoginInFlightRef.current = false;
+      }
+    };
+
+    window.addEventListener("message", onHostAssertion);
+    return () => {
+      window.removeEventListener("message", onHostAssertion);
+    };
+  }, [initDone, setUser, user]);
 
   useEffect(() => {
     if (!user || !isPosMode) return;
@@ -546,23 +646,6 @@ function AppContent() {
     return (
       <LoginPage
         onLoginSuccess={setUser}
-        appMode={appMode}
-        onChangeAppMode={setAppMode}
-      />
-    );
-  }
-
-  if (printParams) {
-    return (
-      <ReceiptPage
-        code={printParams.code}
-        size={printParams.size}
-        isPreview={printParams.isPreview}
-        previewDataStr={printParams.previewDataStr}
-        previewDataKey={printParams.previewDataKey}
-        autoPrint={printParams.autoPrint}
-        autoBack={printParams.autoBack}
-        dryRun={printParams.dryRun}
       />
     );
   }
@@ -576,23 +659,28 @@ function AppContent() {
           return <HistoryPage user={user} appMode={appMode} />;
         case "products":
           return <ProductsPage user={user} appMode={appMode} />;
+        case "treatment-catalogs":
+          return <TreatmentCatalogsPage user={user} appMode={appMode} />;
         case "inventory":
           return <InventoryPage user={user} appMode={appMode} />;
         case "stock":
           return <StockPage user={user} appMode={appMode} />;
-        case "debt":
-          return <DebtPage user={user} appMode={appMode} />;
+        case "customer-progress":
+          return <CustomerProgressPage user={user} appMode={appMode} />;
+        case "staff-management":
+          return <StaffManagementPage user={user} appMode={appMode} />;
         case "stats":
           return <StatsPage user={user} appMode={appMode} />;
-        case "print-diagnostic":
-          return <PrintDiagnosticPage appMode={appMode} />;
+        case "qr-oxu-test":
+          return <QrOxuTestPage user={user} appMode={appMode} />;
         default:
-          return <CreateOrderPage user={user} appMode={appMode} />;
+          return <StatsPage user={user} appMode={appMode} />;
       }
     };
 
     return (
       <div className={`min-h-screen ${isPosMode ? "bg-slate-100 pb-24" : "bg-slate-50"}`}>
+        <UpcomingAppointmentsBanner />
         <GlobalNoticeBanner />
         <div className={isPosMode ? "" : "md:pl-72"}>
           {renderPage()}
@@ -601,7 +689,6 @@ function AppContent() {
           currentPath={currentPath}
           onNavigate={navigate}
           appMode={appMode}
-          onChangeAppMode={setAppMode}
         />
       </div>
     );
@@ -627,7 +714,10 @@ export default function App() {
           },
         }}
       />
-      <AppContent />
+      <ErrorBoundary>
+        <AppContent />
+      </ErrorBoundary>
     </UserProvider>
   );
 }
+

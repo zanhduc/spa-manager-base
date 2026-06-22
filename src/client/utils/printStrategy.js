@@ -461,7 +461,7 @@ function mapBridgeErrorMessage(error) {
       normalized.includes("attempts:") &&
       (normalized.includes("127.0.0.1") || normalized.includes("localhost"))
     ) {
-      return "Không gọi được bridge từ web (có thể do CORS/PNA hoặc bridge chưa mở đúng trên máy POS).";
+      return "Không gọi được bridge từ web (có thể do CORS/PNA hoặc bridge chưa mở đúng trên máy quầy).";
     }
     return "Không kết nối được Print Bridge local.";
   }
@@ -505,7 +505,7 @@ export async function openReceiptWithStrategy(payload, options = {}) {
 
   if (payload?.isPreview) {
     const previewError = "In nhap khong ho tro bridge lock mode.";
-    onInfo("Bản xem trước không hỗ trợ in tự động trên POS.");
+    onInfo("Bản xem trước không hỗ trợ in tự động trên máy quầy.");
     fireAndForgetPrintLog({
       ...baseLog,
       event: "preview_blocked_bridge_lock",
@@ -646,24 +646,9 @@ export async function ensurePrintBridgeReady(options = {}) {
       printerAddress: selected.printerAddress,
     });
     bridgeSetupDone = true;
-    fireAndForgetPrintLog({
-      event: "bridge_autosetup_success",
-      code: "-",
-      size: "-",
-      mode: "bridge",
-      detail: printerDetail(next),
-    });
     return next;
   })()
     .catch((error) => {
-      fireAndForgetPrintLog({
-        event: "bridge_autosetup_failed",
-        code: "-",
-        size: "-",
-        mode: "bridge",
-        status: "ERROR",
-        message: String(error?.message || error || "Bridge autosetup failed"),
-      });
       throw error;
     })
     .finally(() => {

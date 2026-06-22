@@ -1,6 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { CACHE_INVALIDATED_EVENT, CACHE_KEYS, getInventory } from "../api";
+import {
+  CACHE_KEYS,
+  clearReadCacheByKeys,
+  getInventory,
+} from "../api";
+import { readCache } from "../api/localCache.js";
+import {
+  bootstrapSilentAny,
+  hasCachedResponse,
+  readCachedList,
+  shouldBlockPanelUI,
+} from "../utils/cacheBootstrap.js";
+import { useCacheSync } from "../hooks/useCacheSync.js";
 
 const foldText = (v) =>
   String(v || "")
@@ -13,14 +25,15 @@ const foldText = (v) =>
 const fmt = (n) => Number(n || 0).toLocaleString("vi-VN");
 
 export default function StockPage() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !hasCachedResponse(CACHE_KEYS.inventory));
+  const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
-  const [rows, setRows] = useState([]);
+  const [rows, setRows] = useState(() => readCachedList(CACHE_KEYS.inventory));
 
-  const loadInventory = async ({ silent = false } = {}) => {
+  const loadInventory = useCallback(async ({ silent = false, force = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const res = await getInventory();
+      const res = await getInventory({ force });
       if (res?.success && Array.isArray(res.data)) {
         setRows(res.data);
       } else {
@@ -33,23 +46,34 @@ export default function StockPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadInventory();
   }, []);
 
   useEffect(() => {
-    const onInvalidated = (event) => {
-      const keys = event?.detail?.keys;
-      if (!Array.isArray(keys)) return;
+    void loadInventory({ silent: bootstrapSilentAny(CACHE_KEYS.inventory) });
+  }, [loadInventory]);
+
+  useCacheSync({
+    cacheKeys: [CACHE_KEYS.inventory],
+    onCacheUpdated: (_detail, cacheKey) => {
+      if (cacheKey !== CACHE_KEYS.inventory) return;
+      const data = _detail?.response?.data;
+      if (Array.isArray(data)) setRows(data);
+    },
+    onCacheInvalidated: (keys) => {
       if (!keys.includes(CACHE_KEYS.inventory)) return;
-      loadInventory({ silent: true });
-    };
-    window.addEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-    return () =>
-      window.removeEventListener(CACHE_INVALIDATED_EVENT, onInvalidated);
-  }, []);
+      const cached = readCache(CACHE_KEYS.inventory)?.response?.data;
+      if (Array.isArray(cached)) setRows(cached);
+      else loadInventory({ silent: true });
+    },
+  });
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadInventory({ silent: true, force: true });
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const filteredRows = useMemo(() => {
     const q = foldText(query);
@@ -58,6 +82,8 @@ export default function StockPage() {
       foldText(`${r.tenSanPham} ${r.nhomHang} ${r.donVi}`).includes(q),
     );
   }, [rows, query]);
+
+  const blockPanel = shouldBlockPanelUI(loading, rows.length > 0);
 
   const groupedStock = useMemo(() => {
     const map = new Map();
@@ -122,8 +148,8 @@ export default function StockPage() {
   }, [groupedStock]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30">
-      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24">
+    <main className="app-page bg-gradient-to-br from-slate-50 via-slate-50 to-rose-50/30 pb-24">
+      <div className="app-shell">
         <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight">
@@ -148,20 +174,24 @@ export default function StockPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tìm theo tên sản phẩm hoặc nhóm hàng..."
+              placeholder="Tìm theo sản phẩm, dược liệu hoặc nhóm spa..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-rose-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-700/20 transition-all"
             />
             <button
               type="button"
-              onClick={loadInventory}
-              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 whitespace-nowrap md:min-w-[120px]"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 whitespace-nowrap md:min-w-[120px] disabled:cursor-not-allowed disabled:opacity-70 inline-flex items-center justify-center gap-2"
             >
-              Tải lại
+              {refreshing ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-rose-700/80 border-r-transparent" />
+              ) : null}
+              {refreshing ? "Đang tải..." : "Tải lại"}
             </button>
           </div>
         </section>
 
-        {loading ? (
+        {blockPanel ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500 shadow-sm">
             <div
               className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-rose-600 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"
@@ -176,7 +206,7 @@ export default function StockPage() {
         ) : (
           <>
             {/* Giao diện Mobile (Card list) */}
-            <div className="space-y-4 md:hidden">
+            <div className="space-y-4 lg:hidden md:grid md:grid-cols-2 md:gap-4 md:space-y-0">
               {groupedStock.map((row, index) => (
                 <div
                   key={`mobile-${row.key}`}
@@ -243,7 +273,7 @@ export default function StockPage() {
             </div>
 
             {/* Giao diện PC (Table) */}
-            <div className="hidden md:block rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="hidden lg:block rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm text-slate-600">
                   <thead className="bg-slate-50/80 text-xs uppercase text-slate-500 border-b border-slate-200">
